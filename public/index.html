@@ -20,7 +20,6 @@
         
         .board { display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr); gap: 2px; width: min(80vw, 540px); height: min(80vw, 540px); background-color: #334155; padding: 3px; border-radius: 6px; }
         
-        /* Cell Styling & Multipliers Text */
         .cell { background-color: #e2e8f0; border-radius: 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #1e293b; cursor: pointer; position: relative; }
         .cell.type-3E { background-color: #ef4444; color: #ffffff; }
         .cell.type-2E { background-color: #facc15; color: #1e293b; }
@@ -99,7 +98,15 @@
         ];
 
         let gridState = Array(15).fill(null).map(() => Array(15).fill(null));
-        let playerRack = Array(8).fill(null);
+        
+        // กำหนดเบี้ยเริ่มต้นสำรองทันที ป้องกันหน้าจอว่างเปล่า
+        let playerRack = [
+            { id: 'f1', symbol: '7', score: 2 }, { id: 'f2', symbol: '+', score: 2 },
+            { id: 'f3', symbol: '5', score: 2 }, { id: 'f4', symbol: '=', score: 1 },
+            { id: 'f5', symbol: '1', score: 1 }, { id: 'f6', symbol: '2', score: 1 },
+            { id: 'f7', symbol: '×', score: 2 }, { id: 'f8', symbol: '3', score: 1 }
+        ];
+        
         let placedTilesInTurn = [], selectedTileData = null, myScore = 0;
 
         function createRoom() { socket.emit('create_room'); }
@@ -122,10 +129,11 @@
             document.getElementById('lobbyModal').style.display = 'none';
         });
 
-        // รับแจกเบี้ยเริ่มต้น 8 ตัวจาก Server (ไม่ซ้ำกัน)
         socket.on('game_start', ({ currentTurn: turn, hand }) => {
             currentTurn = turn;
-            playerRack = hand;
+            if (hand && hand.length > 0) {
+                playerRack = hand;
+            }
             initRack();
             updateTurnUI();
         });
