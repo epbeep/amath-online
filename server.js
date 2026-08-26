@@ -10,7 +10,8 @@ const io = new Server(server, { cors: { origin: "*" } });
 const publicPath = path.join(__dirname, 'public');
 app.use(express.static(publicPath));
 
-app.get('*', (req, res) => {
+// แก้ไขไวยากรณ์สำหรับ Express 5.x ให้รองรับ Catch-all Route
+app.get('(.*)', (req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
@@ -55,7 +56,6 @@ io.on('connection', (socket) => {
     const roomCode = generateRoomCode();
     const bag = createShuffledBag();
     
-    // แจกเบี้ย 8 ตัวแรกให้ P1 และ P2 จากถุงเดียวกัน
     const p1Hand = bag.splice(0, 8);
     const p2Hand = bag.splice(0, 8);
 
@@ -84,7 +84,6 @@ io.on('connection', (socket) => {
 
     socket.emit('room_joined', { roomCode: code, role: 'P2' });
 
-    // ส่งชุดเบี้ยเฉพาะของตัวเองไปให้ P1 และ P2
     const p1Player = room.players.find(p => p.role === 'P1');
     io.to(p1Player.id).emit('game_start', { currentTurn: 'P1', hand: p1Player.hand });
     io.to(p2Data.id).emit('game_start', { currentTurn: 'P1', hand: p2Data.hand });
