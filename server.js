@@ -10,12 +10,11 @@ const io = new Server(server, { cors: { origin: "*" } });
 const publicPath = path.join(__dirname, 'public');
 app.use(express.static(publicPath));
 
-// สำหรับ Express 5.x: ส่ง index.html สำหรับทุก request ที่ไม่ตรงกับ static file
 app.use((req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
-// คลังกำหนดสเปกเบี้ย A-Math ทั้งหมด 100 ชิ้น
+// คลังกำหนดสเปกเบี้ย A-Math 100 ชิ้น (ใช้ 'x' แทน '*')
 const A_MATH_CONFIG = [
   { symbol: "0", count: 5, score: 1 }, { symbol: "1", count: 6, score: 1 },
   { symbol: "2", count: 6, score: 1 }, { symbol: "3", count: 5, score: 1 },
@@ -29,7 +28,7 @@ const A_MATH_CONFIG = [
   { symbol: "18", count: 1, score: 4 }, { symbol: "19", count: 1, score: 7 },
   { symbol: "20", count: 1, score: 5 }, { symbol: "+", count: 4, score: 2 },
   { symbol: "-", count: 4, score: 2 }, { symbol: "+/-", count: 5, score: 1 },
-  { symbol: "*", count: 4, score: 2 }, { symbol: "/", count: 4, score: 2 },
+  { symbol: "x", count: 4, score: 2 }, { symbol: "/", count: 4, score: 2 },
   { symbol: "*/", count: 4, score: 1 }, { symbol: "=", count: 11, score: 1 },
   { symbol: "BLANK", count: 4, score: 0 }
 ];
@@ -64,7 +63,8 @@ io.on('connection', (socket) => {
       p2Hand: p2Hand,
       bag: bag,
       currentTurn: 'P1',
-      scores: { P1: 0, P2: 0 }
+      scores: { P1: 0, P2: 0 },
+      timers: { P1: 600, P2: 600 } // 10 นาทีแบบ Cumulative ต่อคน
     };
 
     socket.join(roomCode);
@@ -85,19 +85,44 @@ io.on('connection', (socket) => {
     socket.emit('room_joined', { roomCode: code, role: 'P2' });
 
     const p1Player = room.players.find(p => p.role === 'P1');
-    io.to(p1Player.id).emit('game_start', { currentTurn: 'P1', hand: p1Player.hand });
-    io.to(p2Data.id).emit('game_start', { currentTurn: 'P1', hand: p2Data.hand });
+    io.to(p1Player.id).emit('game_start', { currentTurn: 'P1', hand: p1Player.hand, roomTimers: room.timers });
+    io.to(p2Data.id).emit('game_start', { currentTurn: 'P1', hand: p2Data.hand, roomTimers: room.timers });
   });
 
-  socket.on('submit_move', ({ roomCode, placedTiles, fullCells, newScore, nextTurn }) => {
+  socket.on('submit_move', ({ roomCode, placedTiles, fullCells, newScore, nextTurn, timers }) => {
     const room = rooms[roomCode];
     if (!room) return;
 
+    if (timers) room.timers = timers;
     room.scores[nextTurn === 'P2' ? 'P1' : 'P2'] = newScore;
     room.currentTurn = nextTurn;
 
     socket.to(roomCode).emit('opponent_moved', {
-      placedTiles, fullCells, newScore, currentTurn: nextTurn
+      placedTiles, fullCells, newScore, currentTurn: nextTurn, roomTimers: room.timers
+    });
+  });
+
+  // Event เมื่อกดสุ่มเบี้ยใหม่ (Swap All Tiles)
+  socket.on('swap_hand', ({ roomCode, oldHand, nextTurn, timers }) => {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    if (timers) room.timers = timers;
+
+    // นำเบี้ยเดิมใส่กลับเข้าถุง แล้วสลับถุงใหม่
+    room.bag.push(...oldHand.filter(Boolean));
+    room.bag.sort(() => Math.random() - 0.5);
+
+    // ดึงเบี้ยชุดใหม่ 8 ตัวแจกให้ผู้เล่น
+    const newHand = room.bag.splice(0, 8);
+    room.currentTurn = nextTurn;
+
+    // ส่งเบี้ยใหม่ให้ผู้เล่นที่กด Swap
+    socket.emit('hand_swapped', { newHand, currentTurn: nextTurn, roomTimers: room.timers });
+
+    // แจ้งอีกฝ่ายว่ามีการกด Swap และเปลี่ยนตาเล่น
+    socket.to(roomCode).emit('opponent_moved', {
+      placedTiles: [], fullCells: [], newScore: room.scores[nextTurn === 'P1' ? 'P2' : 'P1'], currentTurn: nextTurn, roomTimers: room.timers
     });
   });
 
