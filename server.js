@@ -5,94 +5,107 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*" }
+const io = new Server(server, { cors: { origin: "*" } });
+
+const publicPath = path.join(__dirname, 'public');
+app.use(express.static(publicPath));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(publicPath, 'index.html'));
 });
 
-// ให้บริการไฟล์ Static HTML/JS จากโฟลเดอร์ public
-app.use(express.static(path.join(__dirname, 'public')));
+// คลังกำหนดสเปกเบี้ย A-Math ทั้งหมด 100 ชิ้น
+const A_MATH_CONFIG = [
+  { symbol: "0", count: 5, score: 1 }, { symbol: "1", count: 6, score: 1 },
+  { symbol: "2", count: 6, score: 1 }, { symbol: "3", count: 5, score: 1 },
+  { symbol: "4", count: 5, score: 2 }, { symbol: "5", count: 4, score: 2 },
+  { symbol: "6", count: 4, score: 2 }, { symbol: "7", count: 4, score: 2 },
+  { symbol: "8", count: 4, score: 2 }, { symbol: "9", count: 4, score: 2 },
+  { symbol: "10", count: 2, score: 3 }, { symbol: "11", count: 1, score: 4 },
+  { symbol: "12", count: 2, score: 3 }, { symbol: "13", count: 1, score: 6 },
+  { symbol: "14", count: 1, score: 4 }, { symbol: "15", count: 1, score: 4 },
+  { symbol: "16", count: 1, score: 4 }, { symbol: "17", count: 1, score: 6 },
+  { symbol: "18", count: 1, score: 4 }, { symbol: "19", count: 1, score: 7 },
+  { symbol: "20", count: 1, score: 5 }, { symbol: "+", count: 4, score: 2 },
+  { symbol: "-", count: 4, score: 2 }, { symbol: "+/-", count: 5, score: 1 },
+  { symbol: "*", count: 4, score: 2 }, { symbol: "/", count: 4, score: 2 },
+  { symbol: "*/", count: 4, score: 1 }, { symbol: "=", count: 11, score: 1 },
+  { symbol: "BLANK", count: 4, score: 0 }
+];
 
-// หน่วยความจำเก็บสถานะห้องเกม
+function createShuffledBag() {
+  const bag = [];
+  let idx = 0;
+  A_MATH_CONFIG.forEach(item => {
+    for (let i = 0; i < item.count; i++) {
+      bag.push({ id: `t_${idx++}`, symbol: item.symbol, score: item.score });
+    }
+  });
+  return bag.sort(() => Math.random() - 0.5);
+}
+
 const rooms = {};
 
-// สร้าง รหัสห้องสุ่ม 6 หลัก
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
 io.on('connection', (socket) => {
-  console.log('ผู้เล่นเชื่อมต่อ:', socket.id);
-
-  // 1. สร้างห้องใหม่ (Create Room)
   socket.on('create_room', () => {
     const roomCode = generateRoomCode();
+    const bag = createShuffledBag();
+    
+    // แจกเบี้ย 8 ตัวแรกให้ P1 และ P2 จากถุงเดียวกัน
+    const p1Hand = bag.splice(0, 8);
+    const p2Hand = bag.splice(0, 8);
+
     rooms[roomCode] = {
-      players: [{ id: socket.id, role: 'P1', name: 'Player 1' }],
+      players: [{ id: socket.id, role: 'P1', hand: p1Hand }],
+      p2Hand: p2Hand,
+      bag: bag,
       currentTurn: 'P1',
-      boardState: Array(15).fill(null).map(() => Array(15).fill(null)),
-      scores: { P1: 0, P2: 0 },
-      isGameStarted: false
+      scores: { P1: 0, P2: 0 }
     };
 
     socket.join(roomCode);
     socket.emit('room_created', { roomCode, role: 'P1' });
-    console.log(`ห้องถูกสร้าง: ${roomCode}`);
   });
 
-  // 2. เข้าร่วมห้อง (Join Room)
   socket.on('join_room', (roomCode) => {
     const code = roomCode.trim().toUpperCase();
     const room = rooms[code];
 
-    if (!room) {
-      socket.emit('error_msg', 'ไม่พบรหัสห้องนี้');
-      return;
-    }
+    if (!room) { socket.emit('error_msg', 'ไม่พบรหัสห้องนี้'); return; }
+    if (room.players.length >= 2) { socket.emit('error_msg', 'ห้องนี้เต็มแล้ว'); return; }
 
-    if (room.players.length >= 2) {
-      socket.emit('error_msg', 'ห้องนี้เต็มแล้ว');
-      return;
-    }
-
-    room.players.push({ id: socket.id, role: 'P2', name: 'Player 2' });
-    room.isGameStarted = true;
+    const p2Data = { id: socket.id, role: 'P2', hand: room.p2Hand };
+    room.players.push(p2Data);
     socket.join(code);
 
     socket.emit('room_joined', { roomCode: code, role: 'P2' });
 
-    // แจ้งเตือนผู้เล่นทั้งคู่ว่าเกมเริ่มแล้ว!
-    io.to(code).emit('game_start', {
-      currentTurn: room.currentTurn,
-      players: room.players
-    });
-    console.log(`ผู้เล่น P2 เข้าร่วมห้อง: ${code}`);
+    // ส่งชุดเบี้ยเฉพาะของตัวเองไปให้ P1 และ P2
+    const p1Player = room.players.find(p => p.role === 'P1');
+    io.to(p1Player.id).emit('game_start', { currentTurn: 'P1', hand: p1Player.hand });
+    io.to(p2Data.id).emit('game_start', { currentTurn: 'P1', hand: p2Data.hand });
   });
 
-  // 3. ส่งคำตอบ/วางสมการ (Submit Move)
   socket.on('submit_move', ({ roomCode, placedTiles, fullCells, newScore, nextTurn }) => {
     const room = rooms[roomCode];
     if (!room) return;
 
-    // อัปเดตกระดานและคะแนนฝั่ง Server
     room.scores[nextTurn === 'P2' ? 'P1' : 'P2'] = newScore;
     room.currentTurn = nextTurn;
 
-    // ส่งข้อมูลกระดานที่อัปเดตไปให้ผู้เล่นอีกคนแบบ Real-time!
     socket.to(roomCode).emit('opponent_moved', {
-      placedTiles,
-      fullCells,
-      newScore,
-      currentTurn: nextTurn
+      placedTiles, fullCells, newScore, currentTurn: nextTurn
     });
   });
 
-  // 4. ผู้เล่นตัดการเชื่อมต่อ
   socket.on('disconnect', () => {
-    console.log('ผู้เล่นตัดการเชื่อมต่อ:', socket.id);
     for (const code in rooms) {
       const room = rooms[code];
-      const playerIndex = room.players.findIndex(p => p.id === socket.id);
-      if (playerIndex !== -1) {
+      if (room.players.some(p => p.id === socket.id)) {
         io.to(code).emit('opponent_left', 'ผู้เล่นอีกฝ่ายออกจากเกมแล้ว');
         delete rooms[code];
         break;
@@ -101,7 +114,5 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 A-Math Server กำลังทำงานที่ http://localhost:${PORT}`);
-});
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => { console.log(`Server running on port ${PORT}`); });
