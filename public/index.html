@@ -10,20 +10,18 @@
         body { background-color: #1e293b; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
         
         .lobby-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; gap: 20px; }
-        .lobby-card { background: #334155; padding: 30px; border-radius: 16px; border: 2px solid #475569; display: flex; flex-direction: column; gap: 15px; width: 320px; text-align: center; }
+        .lobby-card { background: #334155; padding: 30px; border-radius: 16px; border: 2px solid #475569; display: flex; flex-direction: column; gap: 15px; width: 340px; text-align: center; }
         .input-box { padding: 10px; border-radius: 8px; border: 1px solid #64748b; background: #1e293b; color: white; font-size: 16px; text-align: center; text-transform: uppercase; }
 
         .header { text-align: center; margin-bottom: 10px; }
         .header h1 { font-size: 24px; color: #38bdf8; }
         
-        /* Scoreboard & Cumulative Timers */
         .score-board { display: flex; gap: 25px; background-color: #334155; padding: 12px 24px; border-radius: 12px; margin-bottom: 10px; font-weight: bold; border: 1px solid #475569; }
         .player-info { display: flex; flex-direction: column; align-items: center; gap: 4px; }
         .timer-box { font-size: 18px; color: #ef4444; font-family: monospace; background: #1e293b; padding: 2px 8px; border-radius: 6px; }
         .timer-box.active { color: #22c55e; border: 1px solid #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
 
         .game-container { display: flex; flex-direction: column; align-items: center; gap: 12px; background-color: #0f172a; padding: 15px; border-radius: 16px; border: 3px solid #334155; }
-        
         .board { display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr); gap: 2px; width: min(80vw, 540px); height: min(80vw, 540px); background-color: #334155; padding: 3px; border-radius: 6px; }
         
         .cell { background-color: #e2e8f0; border-radius: 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #1e293b; cursor: pointer; position: relative; }
@@ -65,12 +63,19 @@
         </div>
     </div>
 
+    <!-- Modal เลือกค่าเบี้ย Blank และเครื่องหมายผสม -->
+    <div id="blankModal" class="lobby-overlay" style="display: none; z-index: 200;">
+        <div class="lobby-card" style="width: 360px; max-height: 80vh; overflow-y: auto;">
+            <h3 id="modalTitle" style="color: #38bdf8;">เลือกสัญลักษณ์</h3>
+            <div id="modalContent" style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;"></div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>A-MATH ONLINE</h1>
         <p>รหัสห้อง: <span id="displayRoomCode" style="color: #facc15; font-weight: bold;">-</span> | บทบาท: <span id="displayRole" style="color: #38bdf8;">-</span></p>
     </div>
 
-    <!-- Score & Cumulative Timers -->
     <div class="score-board">
         <div class="player-info">
             <span>คุณ (You)</span>
@@ -100,7 +105,7 @@
         const socket = io();
         let currentRoomCode = null, myRole = null, currentTurn = 'P1';
         let timerInterval = null;
-        let timers = { P1: 600, P2: 600 }; // 10 นาที (600 วินาที) ต่อคนแบบ Cumulative
+        let timers = { P1: 600, P2: 600 };
 
         const BOARD_LAYOUT = [
             ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "3E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"],
@@ -121,14 +126,9 @@
         ];
 
         let gridState = Array(15).fill(null).map(() => Array(15).fill(null));
-        let playerRack = [
-            { id: 'f1', symbol: '7', score: 2 }, { id: 'f2', symbol: '+', score: 2 },
-            { id: 'f3', symbol: '5', score: 2 }, { id: 'f4', symbol: '=', score: 1 },
-            { id: 'f5', symbol: '1', score: 1 }, { id: 'f6', symbol: '2', score: 1 },
-            { id: 'f7', symbol: 'x', score: 2 }, { id: 'f8', symbol: '3', score: 1 }
-        ];
-        
+        let playerRack = Array(8).fill(null);
         let placedTilesInTurn = [], selectedTileData = null, myScore = 0;
+        let pendingCallback = null;
 
         function createRoom() { socket.emit('create_room'); }
         function joinRoom() {
@@ -168,17 +168,20 @@
             updateTurnUI();
         });
 
+        socket.on('refill_hand', ({ newTiles }) => {
+            newTiles.forEach(tile => {
+                const emptySlotIdx = playerRack.findIndex(slot => slot === null);
+                if (emptySlotIdx !== -1) playerRack[emptySlotIdx] = tile;
+            });
+            initRack();
+        });
+
         socket.on('hand_swapped', ({ newHand, currentTurn: nextTurn, roomTimers }) => {
             playerRack = newHand;
             currentTurn = nextTurn;
             if (roomTimers) timers = roomTimers;
             initRack();
             updateTurnUI();
-        });
-
-        socket.on('timer_update', (roomTimers) => {
-            timers = roomTimers;
-            renderTimers();
         });
 
         socket.on('error_msg', (msg) => { document.getElementById('lobbyError').textContent = msg; });
@@ -282,10 +285,15 @@
         function createTileEl(tileData, isPerm) {
             const tile = document.createElement('div');
             tile.className = `tile ${isPerm ? 'placed-permanently' : ''}`;
-            // แสดงเครื่องหมาย x แทน * บนตัวเบี้ย
-            const displaySymbol = tileData.symbol === '*' ? 'x' : tileData.symbol;
-            tile.innerHTML = `${displaySymbol}<span class="tile-score">${tileData.score}</span>`;
             
+            const textToShow = tileData.displaySymbol || tileData.symbol;
+            const scoreToShow = tileData.isBlank || tileData.symbol === 'BLANK' ? 0 : tileData.score;
+
+            tile.innerHTML = `${textToShow}<span class="tile-score">${scoreToShow}</span>`;
+            if (tileData.isBlank) {
+                tile.style.border = '2px dashed #0284c7';
+            }
+
             if (!isPerm) {
                 tile.onclick = (e) => {
                     e.stopPropagation();
@@ -297,15 +305,69 @@
             return tile;
         }
 
+        function openModalForSelection(title, optionsList, onSelect) {
+            document.getElementById('modalTitle').textContent = title;
+            const container = document.getElementById('modalContent');
+            container.innerHTML = '';
+
+            const grid = document.createElement('div');
+            grid.style.display = 'grid';
+            grid.style.gridTemplateColumns = 'repeat(4, 1fr)';
+            grid.style.gap = '8px';
+
+            optionsList.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.style.padding = '8px';
+                btn.style.fontSize = '14px';
+                btn.textContent = opt;
+                btn.onclick = () => {
+                    document.getElementById('blankModal').style.display = 'none';
+                    onSelect(opt);
+                };
+                grid.appendChild(btn);
+            });
+
+            container.appendChild(grid);
+            document.getElementById('blankModal').style.display = 'flex';
+        }
+
         function onCellClick(r, c) {
             if (!selectedTileData || myRole !== currentTurn) return;
             if (gridState[r][c] || placedTilesInTurn.some(p => p.row === r && p.col === c)) return;
 
+            const sym = selectedTileData.symbol;
+
+            if (sym === 'BLANK') {
+                const allOpts = ["0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","+","-","x","÷","="];
+                openModalForSelection('เลือกสัญลักษณ์สำหรับ BLANK', allOpts, (chosenVal) => {
+                    executePlacement(r, c, chosenVal, true);
+                });
+            } else if (sym === '+/-') {
+                openModalForSelection('เลือกเครื่องหมาย', ['+', '-'], (chosenVal) => {
+                    executePlacement(r, c, chosenVal, false);
+                });
+            } else if (sym === 'x/÷') {
+                openModalForSelection('เลือกเครื่องหมาย', ['x', '÷'], (chosenVal) => {
+                    executePlacement(r, c, chosenVal, false);
+                });
+            } else {
+                executePlacement(r, c, sym, false);
+            }
+        }
+
+        function executePlacement(r, c, chosenSymbol, isBlankTile) {
+            const tileToPlace = {
+                ...selectedTileData,
+                displaySymbol: chosenSymbol,
+                isBlank: isBlankTile
+            };
+
             const rackIdx = playerRack.findIndex(t => t?.id === selectedTileData.id);
             if (rackIdx !== -1) playerRack[rackIdx] = null;
 
-            placedTilesInTurn.push({ tile: selectedTileData, row: r, col: c });
-            gridState[r][c] = { tile: selectedTileData };
+            placedTilesInTurn.push({ tile: tileToPlace, row: r, col: c });
+            gridState[r][c] = { tile: tileToPlace };
             selectedTileData = null;
             initBoard();
             initRack();
@@ -317,13 +379,16 @@
             myScore += 10;
             document.getElementById('myScore').textContent = myScore;
 
+            const remainingHandCount = playerRack.filter(t => t !== null).length;
+
             socket.emit('submit_move', {
                 roomCode: currentRoomCode,
                 placedTiles: placedTilesInTurn,
                 fullCells: placedTilesInTurn,
                 newScore: myScore,
                 nextTurn: nextTurn,
-                timers: timers
+                timers: timers,
+                remainingHandCount: remainingHandCount
             });
 
             placedTilesInTurn = [];
@@ -332,10 +397,9 @@
             updateTurnUI();
         }
 
-        // ฟังก์ชันสุ่มเบี้ยใหม่ (Swap All Tiles)
         function swapTiles() {
             if (myRole !== currentTurn) return;
-            recallTiles(); // ดึงเบี้ยที่อาจจะวางบนกระดานกลับลงแท่นก่อน
+            recallTiles();
             const nextTurn = myRole === 'P1' ? 'P2' : 'P1';
 
             socket.emit('swap_hand', {
@@ -349,8 +413,15 @@
         function recallTiles() {
             placedTilesInTurn.forEach(p => {
                 gridState[p.row][p.col] = null;
+                // ล้างค่าสถานะการเลือกชั่วคราวออกทั้งหมดเมื่อดึงเบี้ยกลับ
+                const cleanTile = {
+                    id: p.tile.id,
+                    symbol: p.tile.symbol,
+                    score: p.tile.score,
+                    type: p.tile.type
+                };
                 const emptySlot = playerRack.findIndex(s => s === null);
-                if (emptySlot !== -1) playerRack[emptySlot] = p.tile;
+                if (emptySlot !== -1) playerRack[emptySlot] = cleanTile;
             });
             placedTilesInTurn = [];
             initBoard();
