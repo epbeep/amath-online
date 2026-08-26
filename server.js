@@ -10,8 +10,8 @@ const io = new Server(server, { cors: { origin: "*" } });
 const publicPath = path.join(__dirname, 'public');
 app.use(express.static(publicPath));
 
-// แก้ไขไวยากรณ์สำหรับ Express 5.x ให้รองรับ Catch-all Route
-app.get('(.*)', (req, res) => {
+// สำหรับ Express 5.x: ส่ง index.html สำหรับทุก request ที่ไม่ตรงกับ static file
+app.use((req, res) => {
   res.sendFile(path.join(publicPath, 'index.html'));
 });
 
