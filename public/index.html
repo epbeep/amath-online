@@ -8,14 +8,14 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Kanit', 'Segoe UI', Tahoma, sans-serif; user-select: none; }
         body { background-color: #1e293b; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
-        
+
         .lobby-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; gap: 20px; }
         .lobby-card { background: #334155; padding: 30px; border-radius: 16px; border: 2px solid #475569; display: flex; flex-direction: column; gap: 15px; width: 340px; text-align: center; }
         .input-box { padding: 10px; border-radius: 8px; border: 1px solid #64748b; background: #1e293b; color: white; font-size: 16px; text-align: center; text-transform: uppercase; }
 
         .header { text-align: center; margin-bottom: 10px; }
         .header h1 { font-size: 24px; color: #38bdf8; }
-        
+
         .score-board { display: flex; gap: 25px; background-color: #334155; padding: 12px 24px; border-radius: 12px; margin-bottom: 10px; font-weight: bold; border: 1px solid #475569; }
         .player-info { display: flex; flex-direction: column; align-items: center; gap: 4px; }
         .timer-box { font-size: 18px; color: #ef4444; font-family: monospace; background: #1e293b; padding: 2px 8px; border-radius: 6px; }
@@ -23,7 +23,7 @@
 
         .game-container { display: flex; flex-direction: column; align-items: center; gap: 12px; background-color: #0f172a; padding: 15px; border-radius: 16px; border: 3px solid #334155; }
         .board { display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr); gap: 2px; width: min(80vw, 540px); height: min(80vw, 540px); background-color: #334155; padding: 3px; border-radius: 6px; }
-        
+
         .cell { background-color: #e2e8f0; border-radius: 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #1e293b; cursor: pointer; position: relative; }
         .cell.type-3E { background-color: #ef4444; color: #ffffff; }
         .cell.type-2E { background-color: #facc15; color: #1e293b; }
@@ -40,14 +40,24 @@
 
         .rack { display: flex; gap: 6px; background-color: #334155; padding: 8px; border-radius: 10px; min-height: 50px; }
         .rack-slot { width: 38px; height: 42px; background-color: #1e293b; border-radius: 4px; border: 1px dashed #64748b; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-        
+
         .btn { background-color: #22c55e; color: white; border: none; padding: 10px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
         .btn:hover { opacity: 0.9; }
         .btn:disabled { background-color: #64748b; cursor: not-allowed; }
         .btn-swap { background-color: #a855f7; color: white; }
         .btn-swap:hover { background-color: #9333ea; }
-        
+
         .status-msg { font-size: 13px; color: #38bdf8; font-weight: bold; height: 18px; }
+        .status-msg.error { color: #ef4444; }
+
+        .card-panel { display: flex; align-items: center; gap: 10px; background-color: #334155; padding: 8px 12px; border-radius: 10px; }
+        .card-item { display: flex; flex-direction: column; align-items: center; gap: 4px; background: #1e293b; border: 1px solid #64748b; border-radius: 8px; padding: 6px 8px; min-width: 70px; }
+        .card-item .card-name { font-size: 10px; text-align: center; line-height: 1.2; }
+        .card-item .card-stars { font-size: 9px; color: #facc15; }
+        .card-item button { font-size: 10px; padding: 3px 8px; }
+        .card-item.targeting { outline: 2px solid #38bdf8; }
+        .cell.targetable { outline: 2px dashed #38bdf8; cursor: crosshair; }
+        .cell.locked-cell { outline: 3px solid #ef4444; }
     </style>
 </head>
 <body>
@@ -68,6 +78,15 @@
         <div class="lobby-card" style="width: 360px; max-height: 80vh; overflow-y: auto;">
             <h3 id="modalTitle" style="color: #38bdf8;">เลือกสัญลักษณ์</h3>
             <div id="modalContent" style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <!-- Modal จบเกม -->
+    <div id="gameOverModal" class="lobby-overlay" style="display: none; z-index: 250;">
+        <div class="lobby-card">
+            <h2 id="gameOverTitle" style="color: #facc15;">จบเกม!</h2>
+            <div id="gameOverBody" style="font-size: 15px;"></div>
+            <button class="btn" onclick="location.reload()">เล่นใหม่</button>
         </div>
     </div>
 
@@ -94,18 +113,40 @@
         <div class="status-msg" id="statusMsg">สร้างหรือเข้าร่วมห้องเพื่อเริ่มเล่น</div>
         <div id="board" class="board"></div>
         <div id="rack" class="rack"></div>
-        <div class="controls" style="display: flex; gap: 8px;">
+        <div class="controls" style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
             <button id="submitBtn" class="btn" onclick="submitMove()" disabled>ส่งคำตอบ (PLAY)</button>
             <button id="swapBtn" class="btn btn-swap" onclick="swapTiles()" disabled>สุ่มเบี้ยใหม่ (Swap)</button>
+            <button id="passBtn" class="btn" style="background-color: #64748b;" onclick="passTurn()" disabled>ข้ามตา (Pass)</button>
             <button class="btn" style="background-color: #eab308; color: #1e293b;" onclick="recallTiles()">ดึงเบี้ยกลับ</button>
+        </div>
+        <div class="card-panel">
+            <button id="drawCardBtn" class="btn" style="background-color: #ec4899;" onclick="drawCard()" disabled>🎴 สุ่มการ์ด</button>
+            <div id="cardCooldownMsg" style="font-size: 11px; color: #94a3b8;"></div>
+            <div id="cardHandEl" style="display: flex; gap: 8px;"></div>
         </div>
     </div>
 
     <script>
         const socket = io();
-        let currentRoomCode = null, myRole = null, currentTurn = 'P1';
+
+        // ---- persistent session identity (survives reload / reconnect) ----
+        function getSessionId() {
+            let id = localStorage.getItem('amath_session_id');
+            if (!id) {
+                id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+                localStorage.setItem('amath_session_id', id);
+            }
+            return id;
+        }
+        const sessionId = getSessionId();
+
+        let currentRoomCode = localStorage.getItem('amath_room') || null;
+        let myRole = localStorage.getItem('amath_role') || null;
+        let currentTurn = 'P1';
         let timerInterval = null;
         let timers = { P1: 600, P2: 600 };
+        let bagLeft = 100;
+        let gameOver = null;
 
         const BOARD_LAYOUT = [
             ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "3E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"],
@@ -127,71 +168,230 @@
 
         let gridState = Array(15).fill(null).map(() => Array(15).fill(null));
         let playerRack = Array(8).fill(null);
-        let placedTilesInTurn = [], selectedTileData = null, myScore = 0;
-        let pendingCallback = null;
+        let placedTilesInTurn = [], selectedTileData = null;
 
-        function createRoom() { socket.emit('create_room'); }
+        // ---- item cards ----
+        const CARD_INFO = {
+            freeze_time:      { name: 'แช่แข็งเวลา +60วิ',        stars: 2, target: 'none' },
+            disable_specials: { name: 'ยกเลิกช่องพิเศษ (คู่แข่ง)', stars: 2, target: 'none' },
+            free_blank:       { name: 'BLANK ฟรี',                stars: 3, target: 'discard1' },
+            cell_lock:        { name: 'ล็อกช่อง',                 stars: 3, target: 'cell' },
+            tile_swap_3:      { name: 'สลับเบี้ย 3 ตัว',           stars: 4, target: 'tiles3' },
+            double_score:     { name: 'Double Score',             stars: 4, target: 'none' },
+            equal_strike:     { name: 'Equal Strike',             stars: 4, target: 'none' },
+            swap_rack:        { name: 'Swap Rack',                stars: 5, target: 'none' }
+        };
+        let myCardHand = [], myCardCooldown = 0;
+        let pendingCardAction = null; // { instanceId, cardId, target, selected: [] }
+        let myLockedCell = null;      // { row, col } — a cell an opponent's Cell Lock has closed off for my next move
+
+        function createRoom() {
+            socket.emit('create_room', { sessionId });
+        }
         function joinRoom() {
             const code = document.getElementById('roomCodeInput').value;
-            if (code) socket.emit('join_room', code);
+            if (code) socket.emit('join_room', { roomCode: code, sessionId });
         }
+
+        socket.on('connect', () => {
+            // attempt to resume an existing game after reload / reconnect
+            if (currentRoomCode) {
+                socket.emit('rejoin_room', { roomCode: currentRoomCode, sessionId });
+            }
+        });
 
         socket.on('room_created', ({ roomCode, role }) => {
             currentRoomCode = roomCode; myRole = role;
+            localStorage.setItem('amath_room', roomCode);
+            localStorage.setItem('amath_role', role);
             document.getElementById('displayRoomCode').textContent = roomCode;
             document.getElementById('displayRole').textContent = 'ผู้เล่น 1 (Host)';
             document.getElementById('lobbyModal').style.display = 'none';
+            document.getElementById('statusMsg').textContent = 'รอผู้เล่นอีกฝ่ายเข้าร่วม...';
         });
 
         socket.on('room_joined', ({ roomCode, role }) => {
             currentRoomCode = roomCode; myRole = role;
+            localStorage.setItem('amath_room', roomCode);
+            localStorage.setItem('amath_role', role);
             document.getElementById('displayRoomCode').textContent = roomCode;
             document.getElementById('displayRole').textContent = 'ผู้เล่น 2 (Guest)';
             document.getElementById('lobbyModal').style.display = 'none';
         });
 
-        socket.on('game_start', ({ currentTurn: turn, hand, roomTimers }) => {
-            currentTurn = turn;
-            if (hand && hand.length > 0) playerRack = hand;
-            if (roomTimers) timers = roomTimers;
-            initRack();
-            updateTurnUI();
-            startTimerLoop();
+        socket.on('rejoin_failed', () => {
+            localStorage.removeItem('amath_room');
+            localStorage.removeItem('amath_role');
+            currentRoomCode = null; myRole = null;
+            document.getElementById('lobbyModal').style.display = 'flex';
+            document.getElementById('lobbyError').textContent = 'ไม่พบเกมเดิม กรุณาสร้างหรือเข้าร่วมห้องใหม่';
         });
 
-        socket.on('opponent_moved', ({ fullCells, newScore, currentTurn: nextTurn, roomTimers }) => {
-            fullCells.forEach(cell => { gridState[cell.row][cell.col] = { tile: cell.tile }; });
-            document.getElementById('oppScore').textContent = newScore;
+        socket.on('opponent_reconnected', () => {
+            document.getElementById('statusMsg').textContent = 'คู่แข่งเชื่อมต่อกลับมาแล้ว';
+        });
+
+        // Single source of truth for board/hand/scores — sent on start and on rejoin.
+        socket.on('state_sync', ({ role, hand, gridCells, scores, currentTurn: turn, timers: t, bagLeft: bl, gameOver: go, cardHand, cardCooldown }) => {
+            myRole = role;
+            myCardHand = cardHand || [];
+            myCardCooldown = cardCooldown || 0;
+            myLockedCell = null;
+            document.getElementById('lobbyModal').style.display = 'none';
+            document.getElementById('displayRoomCode').textContent = currentRoomCode;
+            document.getElementById('displayRole').textContent = role === 'P1' ? 'ผู้เล่น 1 (Host)' : 'ผู้เล่น 2 (Guest)';
+
+            playerRack = hand;
+            gridState = Array(15).fill(null).map(() => Array(15).fill(null));
+            gridCells.forEach(c => { gridState[c.row][c.col] = { tile: c.tile }; });
+            placedTilesInTurn = [];
+
+            document.getElementById('myScore').textContent = scores[role];
+            document.getElementById('oppScore').textContent = scores[role === 'P1' ? 'P2' : 'P1'];
+
+            currentTurn = turn;
+            timers = t || timers;
+            bagLeft = bl;
+            gameOver = go;
+
+            initBoard();
+            initRack();
+            updateTurnUI();
+            renderCardPanel();
+            startTimerLoop();
+            if (gameOver) showGameOver(gameOver);
+        });
+
+        socket.on('game_ready', () => {
+            document.getElementById('statusMsg').textContent = 'เกมเริ่มแล้ว!';
+        });
+
+        socket.on('move_accepted', ({ hand, scores, currentTurn: turn, bagLeft: bl, gridUpdates, gainedScore, bonus, card }) => {
+            gridUpdates.forEach(u => { gridState[u.row][u.col] = { tile: u.tile }; });
+            playerRack = hand;
+            placedTilesInTurn = [];
+            myLockedCell = null;
+            if (card) { myCardHand = card.cardHand; myCardCooldown = card.cooldown; }
+            document.getElementById('myScore').textContent = scores[myRole];
+            document.getElementById('oppScore').textContent = scores[myRole === 'P1' ? 'P2' : 'P1'];
+            currentTurn = turn;
+            bagLeft = bl;
+            initBoard();
+            initRack();
+            updateTurnUI();
+            renderCardPanel();
+            if (bonus) {
+                const el = document.getElementById('statusMsg');
+                el.textContent = `🎉 ใช้เบี้ยหมดมือ! ได้โบนัสพิเศษ +${bonus} คะแนน (รวม +${gainedScore + bonus})`;
+            }
+        });
+
+        socket.on('move_rejected', ({ reason }) => {
+            recallTiles();
+            const el = document.getElementById('statusMsg');
+            el.textContent = '❌ ' + reason;
+            el.classList.add('error');
+            setTimeout(() => el.classList.remove('error'), 2500);
+        });
+
+        socket.on('opponent_moved', ({ gridUpdates, scores, currentTurn: nextTurn, bagLeft: bl, bonus }) => {
+            gridUpdates.forEach(u => { gridState[u.row][u.col] = { tile: u.tile }; });
+            document.getElementById('myScore').textContent = scores[myRole];
+            document.getElementById('oppScore').textContent = scores[myRole === 'P1' ? 'P2' : 'P1'];
             currentTurn = nextTurn;
-            if (roomTimers) timers = roomTimers;
+            bagLeft = bl;
             initBoard();
             updateTurnUI();
+            if (bonus) {
+                document.getElementById('statusMsg').textContent = `⚡ คู่แข่งใช้เบี้ยหมดมือ ได้โบนัส +${bonus}`;
+            }
         });
 
-        socket.on('refill_hand', ({ newTiles }) => {
-            newTiles.forEach(tile => {
-                const emptySlotIdx = playerRack.findIndex(slot => slot === null);
-                if (emptySlotIdx !== -1) playerRack[emptySlotIdx] = tile;
-            });
-            initRack();
+        socket.on('turn_passed', ({ currentTurn: turn, card }) => {
+            currentTurn = turn;
+            placedTilesInTurn = [];
+            myLockedCell = null;
+            if (card) { myCardHand = card.cardHand; myCardCooldown = card.cooldown; }
+            updateTurnUI();
+            renderCardPanel();
         });
 
-        socket.on('hand_swapped', ({ newHand, currentTurn: nextTurn, roomTimers }) => {
-            playerRack = newHand;
+        socket.on('hand_swapped', ({ hand, currentTurn: nextTurn, bagLeft: bl, card }) => {
+            playerRack = hand;
             currentTurn = nextTurn;
-            if (roomTimers) timers = roomTimers;
+            bagLeft = bl;
+            myLockedCell = null;
+            if (card) { myCardHand = card.cardHand; myCardCooldown = card.cooldown; }
             initRack();
             updateTurnUI();
+            renderCardPanel();
+        });
+
+        // ---- item card events ----
+        socket.on('card_drawn', ({ card, currentTurn: turn, cardHand, cooldown }) => {
+            myCardHand = cardHand;
+            myCardCooldown = cooldown;
+            currentTurn = turn;
+            const info = CARD_INFO[card.cardId] || { name: card.name };
+            document.getElementById('statusMsg').textContent = `🎴 ได้การ์ด: ${info.name}!`;
+            updateTurnUI();
+            renderCardPanel();
+        });
+
+        socket.on('opponent_drew_card', () => {
+            document.getElementById('statusMsg').textContent = '🎴 คู่แข่งสุ่มการ์ด...';
+        });
+
+        socket.on('card_used', ({ cardId, cardHand, effect, hand }) => {
+            myCardHand = cardHand;
+            if (hand) playerRack = hand;
+            if (effect?.timers) timers = effect.timers;
+            const info = CARD_INFO[cardId] || { name: cardId };
+            document.getElementById('statusMsg').textContent = `✅ ใช้การ์ด "${info.name}" สำเร็จ`;
+            renderCardPanel();
+            initRack();
+            renderTimers();
+        });
+
+        socket.on('opponent_used_card', ({ cardId, effect, hand }) => {
+            if (hand) { playerRack = hand; initRack(); }
+            if (effect?.type === 'cell_lock') { myLockedCell = { row: effect.row, col: effect.col }; initBoard(); }
+            const info = CARD_INFO[cardId] || { name: cardId };
+            document.getElementById('statusMsg').textContent = `⚡ คู่แข่งใช้การ์ด: ${info.name}`;
+        });
+
+        socket.on('opponent_left', (msg) => {
+            document.getElementById('statusMsg').textContent = '⚠️ ' + msg;
+        });
+
+        socket.on('game_over', (payload) => {
+            gameOver = payload;
+            showGameOver(payload);
         });
 
         socket.on('error_msg', (msg) => { document.getElementById('lobbyError').textContent = msg; });
 
+        function showGameOver(payload) {
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('swapBtn').disabled = true;
+            if (timerInterval) clearInterval(timerInterval);
+            const myFinal = payload.scores[myRole];
+            const oppFinal = payload.scores[myRole === 'P1' ? 'P2' : 'P1'];
+            let title = 'เสมอกัน!';
+            if (payload.winner) title = payload.winner === myRole ? '🎉 คุณชนะ!' : '😢 คุณแพ้';
+            document.getElementById('gameOverTitle').textContent = title;
+            document.getElementById('gameOverBody').innerHTML = `คะแนนคุณ: <b>${myFinal}</b><br>คะแนนคู่แข่ง: <b>${oppFinal}</b>`;
+            document.getElementById('gameOverModal').style.display = 'flex';
+        }
+
         function startTimerLoop() {
             if (timerInterval) clearInterval(timerInterval);
             timerInterval = setInterval(() => {
+                if (gameOver) { clearInterval(timerInterval); return; }
                 if (timers[currentTurn] > 0) {
                     timers[currentTurn]--;
                     renderTimers();
+                    socket.emit('sync_timers', { roomCode: currentRoomCode, timers });
                 } else {
                     document.getElementById('statusMsg').textContent = `⏰ เวลาของ ${currentTurn} หมดลงแล้ว!`;
                     clearInterval(timerInterval);
@@ -225,11 +425,13 @@
         }
 
         function updateTurnUI() {
-            const isMyTurn = myRole === currentTurn;
+            const isMyTurn = myRole === currentTurn && !gameOver;
             document.getElementById('submitBtn').disabled = !isMyTurn;
             document.getElementById('swapBtn').disabled = !isMyTurn;
-            document.getElementById('statusMsg').textContent = isMyTurn ? '★ ตาของคุณแล้ว! วางเบี้ยได้เลย' : 'รอคู่แข่งวางสมการ...';
+            document.getElementById('passBtn').disabled = !isMyTurn;
+            document.getElementById('statusMsg').textContent = gameOver ? 'เกมจบแล้ว' : (isMyTurn ? '★ ตาของคุณแล้ว! วางเบี้ยได้เลย' : 'รอคู่แข่งวางสมการ...');
             renderTimers();
+            renderCardPanel();
         }
 
         function renderCellLabel(cell, cellType) {
@@ -253,12 +455,18 @@
                     const cellType = BOARD_LAYOUT[r][c];
                     const cell = document.createElement('div');
                     cell.className = `cell type-${cellType}`;
-                    
+
                     renderCellLabel(cell, cellType);
 
                     if (gridState[r][c]) {
                         cell.innerHTML = '';
                         cell.appendChild(createTileEl(gridState[r][c].tile, true));
+                    } else if (pendingCardAction?.target === 'cell') {
+                        cell.className += ' targetable';
+                    }
+
+                    if (myLockedCell && myLockedCell.row === r && myLockedCell.col === c) {
+                        cell.className += ' locked-cell';
                     }
 
                     cell.onclick = () => onCellClick(r, c);
@@ -285,7 +493,7 @@
         function createTileEl(tileData, isPerm) {
             const tile = document.createElement('div');
             tile.className = `tile ${isPerm ? 'placed-permanently' : ''}`;
-            
+
             const textToShow = tileData.displaySymbol || tileData.symbol;
             const scoreToShow = tileData.isBlank || tileData.symbol === 'BLANK' ? 0 : tileData.score;
 
@@ -294,10 +502,18 @@
                 tile.style.border = '2px dashed #0284c7';
             }
 
+            if (pendingCardAction?.target === 'tiles3' && pendingCardAction.selected.includes(tileData.id)) {
+                tile.classList.add('selected');
+            }
+
             if (!isPerm) {
                 tile.onclick = (e) => {
                     e.stopPropagation();
                     if (myRole !== currentTurn) return;
+                    if (pendingCardAction && (pendingCardAction.target === 'discard1' || pendingCardAction.target === 'tiles3')) {
+                        handleCardTileClick(tileData);
+                        return;
+                    }
                     selectedTileData = selectedTileData?.id === tileData.id ? null : tileData;
                     initRack();
                 };
@@ -333,7 +549,12 @@
         }
 
         function onCellClick(r, c) {
-            if (!selectedTileData || myRole !== currentTurn) return;
+            if (pendingCardAction?.target === 'cell') {
+                if (myRole !== currentTurn || gameOver || gridState[r][c]) return;
+                confirmUseCard({ row: r, col: c });
+                return;
+            }
+            if (!selectedTileData || myRole !== currentTurn || gameOver) return;
             if (gridState[r][c] || placedTilesInTurn.some(p => p.row === r && p.col === c)) return;
 
             const sym = selectedTileData.symbol;
@@ -374,46 +595,35 @@
         }
 
         function submitMove() {
-            if (placedTilesInTurn.length === 0) return;
-            const nextTurn = myRole === 'P1' ? 'P2' : 'P1';
-            myScore += 10;
-            document.getElementById('myScore').textContent = myScore;
+            if (placedTilesInTurn.length === 0 || gameOver) return;
 
-            const remainingHandCount = playerRack.filter(t => t !== null).length;
+            const placements = placedTilesInTurn.map(p => ({
+                tileId: p.tile.id,
+                row: p.row,
+                col: p.col,
+                displaySymbol: p.tile.displaySymbol || p.tile.symbol
+            }));
 
-            socket.emit('submit_move', {
-                roomCode: currentRoomCode,
-                placedTiles: placedTilesInTurn,
-                fullCells: placedTilesInTurn,
-                newScore: myScore,
-                nextTurn: nextTurn,
-                timers: timers,
-                remainingHandCount: remainingHandCount
-            });
-
-            placedTilesInTurn = [];
-            currentTurn = nextTurn;
-            initBoard();
-            updateTurnUI();
+            socket.emit('submit_move', { roomCode: currentRoomCode, placements });
+            // wait for move_accepted / move_rejected — server is authoritative.
         }
 
         function swapTiles() {
-            if (myRole !== currentTurn) return;
+            if (myRole !== currentTurn || gameOver) return;
             recallTiles();
-            const nextTurn = myRole === 'P1' ? 'P2' : 'P1';
+            const tileIds = playerRack.filter(Boolean).map(t => t.id);
+            socket.emit('swap_hand', { roomCode: currentRoomCode, tileIds });
+        }
 
-            socket.emit('swap_hand', {
-                roomCode: currentRoomCode,
-                oldHand: playerRack,
-                nextTurn: nextTurn,
-                timers: timers
-            });
+        function passTurn() {
+            if (myRole !== currentTurn || gameOver) return;
+            recallTiles(); // don't lose any tiles staged on the board
+            socket.emit('pass_turn', { roomCode: currentRoomCode });
         }
 
         function recallTiles() {
             placedTilesInTurn.forEach(p => {
                 gridState[p.row][p.col] = null;
-                // ล้างค่าสถานะการเลือกชั่วคราวออกทั้งหมดเมื่อดึงเบี้ยกลับ
                 const cleanTile = {
                     id: p.tile.id,
                     symbol: p.tile.symbol,
@@ -428,8 +638,84 @@
             initRack();
         }
 
+        function drawCard() {
+            if (myRole !== currentTurn || gameOver || myCardCooldown > 0 || myCardHand.length >= 2) return;
+            socket.emit('draw_card', { roomCode: currentRoomCode });
+        }
+
+        function targetingHint(target) {
+            if (target === 'cell') return '🎯 คลิกช่องว่างบนกระดานเพื่อล็อกช่องนั้น (คู่แข่งจะวางไม่ได้ตาถัดไป)';
+            if (target === 'discard1') return '🎯 คลิกเบี้ยในมือ 1 ใบที่จะแลกทิ้ง เพื่อรับ BLANK ฟรี';
+            if (target === 'tiles3') return '🎯 คลิกเบี้ยในมือ 3 ใบที่จะส่งให้คู่แข่ง (คุณจะได้เบี้ยสุ่ม 3 ใบจากเขามาแทน)';
+            return '';
+        }
+
+        function startUseCard(c) {
+            if (pendingCardAction?.instanceId === c.instanceId) {
+                pendingCardAction = null;
+                renderCardPanel(); initBoard(); initRack();
+                updateTurnUI();
+                return;
+            }
+            const info = CARD_INFO[c.cardId];
+            if (!info || info.target === 'none') {
+                socket.emit('use_card', { roomCode: currentRoomCode, instanceId: c.instanceId, payload: {} });
+                return;
+            }
+            pendingCardAction = { instanceId: c.instanceId, cardId: c.cardId, target: info.target, selected: [] };
+            renderCardPanel(); initBoard(); initRack();
+            document.getElementById('statusMsg').textContent = targetingHint(info.target);
+        }
+
+        function handleCardTileClick(tileData) {
+            if (pendingCardAction.target === 'discard1') {
+                confirmUseCard({ discardTileId: tileData.id });
+                return;
+            }
+            if (pendingCardAction.target === 'tiles3') {
+                const idx = pendingCardAction.selected.indexOf(tileData.id);
+                if (idx !== -1) pendingCardAction.selected.splice(idx, 1);
+                else if (pendingCardAction.selected.length < 3) pendingCardAction.selected.push(tileData.id);
+                initRack();
+                if (pendingCardAction.selected.length === 3) {
+                    confirmUseCard({ tileIds: [...pendingCardAction.selected] });
+                }
+            }
+        }
+
+        function confirmUseCard(payload) {
+            socket.emit('use_card', { roomCode: currentRoomCode, instanceId: pendingCardAction.instanceId, payload });
+            pendingCardAction = null;
+            initBoard(); initRack();
+        }
+
+        function renderCardPanel() {
+            const canDraw = myRole === currentTurn && !gameOver && myCardCooldown === 0 && myCardHand.length < 2;
+            document.getElementById('drawCardBtn').disabled = !canDraw;
+            document.getElementById('cardCooldownMsg').textContent =
+                myCardCooldown > 0 ? `รออีก ${myCardCooldown} ตาถึงสุ่มการ์ดได้อีก` :
+                (myCardHand.length >= 2 ? 'มือการ์ดเต็ม (ใช้ก่อนถึงจะสุ่มใหม่ได้)' : '');
+
+            const el = document.getElementById('cardHandEl');
+            el.innerHTML = '';
+            myCardHand.forEach(c => {
+                const info = CARD_INFO[c.cardId] || { name: c.cardId, stars: 0 };
+                const div = document.createElement('div');
+                div.className = 'card-item' + (pendingCardAction?.instanceId === c.instanceId ? ' targeting' : '');
+                div.innerHTML = `<div class="card-name">${info.name}</div><div class="card-stars">${'⭐'.repeat(info.stars)}</div>`;
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.textContent = pendingCardAction?.instanceId === c.instanceId ? 'ยกเลิก' : 'ใช้';
+                btn.disabled = myRole !== currentTurn || !!gameOver;
+                btn.onclick = () => startUseCard(c);
+                div.appendChild(btn);
+                el.appendChild(div);
+            });
+        }
+
         initBoard();
         initRack();
+        renderCardPanel();
     </script>
 </body>
 </html>
