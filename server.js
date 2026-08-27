@@ -677,8 +677,16 @@ io.on('connection', (socket) => {
 
   socket.on('sync_timers', ({ roomCode, timers }) => {
     const room = rooms[roomCode];
-    if (!room || !timers) return;
+    if (!room || !timers || room.gameOver) return;
     room.timers = timers;
+
+    // server-authoritative timeout enforcement: whoever's turn it is loses if their clock hits 0
+    const activeRole = room.currentTurn;
+    if (room.timers[activeRole] !== undefined && room.timers[activeRole] <= 0) {
+      const winner = otherRole(activeRole);
+      room.gameOver = { winner, scores: room.scores, reason: 'timeout' };
+      io.to(roomCode).emit('game_over', room.gameOver);
+    }
   });
 
   socket.on('disconnect', () => {
