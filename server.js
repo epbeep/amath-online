@@ -111,8 +111,10 @@ function createShuffledBag() {
 }
 
 function isValidInitialHand(hand) {
-  const hasEqual = hand.some(t => t.symbol === '=' || t.symbol === 'BLANK');
-  const hasOperator = hand.some(t => ['+', '-', 'x', '÷', '+/-', 'x/÷', 'BLANK'].includes(t.symbol));
+  // must contain a real '=' tile and a real operator tile — a BLANK can't stand in for
+  // either of these, or a hand could pass this check with no way to actually form an equation
+  const hasEqual = hand.some(t => t.symbol === '=');
+  const hasOperator = hand.some(t => ['+', '-', 'x', '÷', '+/-', 'x/÷'].includes(t.symbol));
   const hasNumber = hand.some(t => t.type === 'number' || t.symbol === 'BLANK');
   return hasEqual && hasOperator && hasNumber;
 }
@@ -122,7 +124,7 @@ function dealInitialHands() {
   let p1Hand = [], p2Hand = [];
 
   let attempts = 0;
-  while (attempts < 100) {
+  while (attempts < 300) {
     p1Hand = bag.slice(0, 8);
     if (isValidInitialHand(p1Hand)) { bag = bag.slice(8); break; }
     bag.sort(() => Math.random() - 0.5);
@@ -130,7 +132,7 @@ function dealInitialHands() {
   }
 
   attempts = 0;
-  while (attempts < 100) {
+  while (attempts < 300) {
     p2Hand = bag.slice(0, 8);
     if (isValidInitialHand(p2Hand)) { bag = bag.slice(8); break; }
     bag.sort(() => Math.random() - 0.5);
@@ -571,7 +573,7 @@ io.on('connection', (socket) => {
     const drawCount = Math.min(toSwap.length, room.bag.length);
     let newHand = keep.concat(room.bag.slice(0, drawCount));
     let attempts = 0;
-    while (attempts < 100 && !isValidInitialHand(newHand)) {
+    while (attempts < 300 && !isValidInitialHand(newHand)) {
       room.bag.sort(() => Math.random() - 0.5);
       newHand = keep.concat(room.bag.slice(0, drawCount));
       attempts++;
