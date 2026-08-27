@@ -179,7 +179,7 @@
         let myRole = localStorage.getItem('amath_role') || null;
         let currentTurn = 'P1';
         let wasMyTurn = false;
-        let timerInterval = null;
+        let timerInterval = null; // kept only so any stray old references are harmless no-ops
         let timers = { P1: 600, P2: 600 };
         let bagLeft = 100;
         let gameOver = null;
@@ -292,6 +292,11 @@
 
         socket.on('opponent_reconnected', () => {
             document.getElementById('statusMsg').textContent = 'คู่แข่งเชื่อมต่อกลับมาแล้ว';
+        });
+
+        socket.on('timer_update', ({ timers: t }) => {
+            timers = t;
+            renderTimers();
         });
 
         // Single source of truth for board/hand/scores — sent on start and on rejoin.
@@ -466,19 +471,12 @@
             location.reload();
         }
 
+        // Timers are now fully server-authoritative — the server ticks every room's
+        // clock itself and pushes 'timer_update' to both clients each second, so this
+        // function just renders whatever value the server last sent. No local countdown,
+        // no drift between the two players' screens, and no client needed to trigger a timeout.
         function startTimerLoop() {
-            if (timerInterval) clearInterval(timerInterval);
-            timerInterval = setInterval(() => {
-                if (gameOver) { clearInterval(timerInterval); return; }
-                if (timers[currentTurn] > 0) {
-                    timers[currentTurn]--;
-                    renderTimers();
-                    socket.emit('sync_timers', { roomCode: currentRoomCode, timers });
-                } else {
-                    document.getElementById('statusMsg').textContent = `⏰ เวลาของ ${currentTurn} หมดลงแล้ว! กำลังจบเกม...`;
-                    clearInterval(timerInterval);
-                }
-            }, 1000);
+            renderTimers();
         }
 
         function renderTimers() {
@@ -556,9 +554,22 @@
                         const isStaged = !gridState[r][c].confirmed;
                         const tileEl = createTileEl(gridState[r][c].tile, !isStaged);
                         if (isStaged) {
-                            tileEl.style.cursor = 'pointer';
-                            tileEl.title = 'คลิกเพื่อดึงเบี้ยตัวนี้กลับมือ';
-                            tileEl.onclick = (e) => { e.stopPropagation(); recallSingleTile(r, c); };
+                            if (pendingCardAction) {
+                                // mid-way through choosing a card target (e.g. discard1/tiles3/cell) —
+                                // ignore this click instead of silently recalling, so the card flow
+                                // never gets left stuck half-finished (which used to block rack tile
+                                // selection afterwards).
+                                tileEl.style.cursor = 'not-allowed';
+                                tileEl.title = 'ยกเลิกการใช้การ์ดก่อน ถึงจะดึงเบี้ยตัวนี้กลับได้';
+                                tileEl.onclick = (e) => {
+                                    e.stopPropagation();
+                                    document.getElementById('statusMsg').textContent = '⚠️ กำลังเลือกเป้าหมายการ์ดอยู่ — กดปุ่ม "ยกเลิก" ที่การ์ดก่อน ถ้าไม่ต้องการใช้แล้ว';
+                                };
+                            } else {
+                                tileEl.style.cursor = 'pointer';
+                                tileEl.title = 'คลิกเพื่อดึงเบี้ยตัวนี้กลับมือ';
+                                tileEl.onclick = (e) => { e.stopPropagation(); recallSingleTile(r, c); };
+                            }
                         }
                         cell.appendChild(tileEl);
                     } else if (pendingCardAction?.target === 'cell') {
@@ -698,6 +709,7 @@
 
         function submitMove() {
             if (placedTilesInTurn.length === 0 || gameOver) return;
+            pendingCardAction = null; // defensive: never let a stuck card-targeting state linger past a real move
 
             const placements = placedTilesInTurn.map(p => ({
                 tileId: p.tile.id,
@@ -712,6 +724,7 @@
 
         function swapTiles() {
             if (myRole !== currentTurn || gameOver) return;
+            pendingCardAction = null;
             recallTiles();
             const tileIds = playerRack.filter(Boolean).map(t => t.id);
             socket.emit('swap_hand', { roomCode: currentRoomCode, tileIds });
@@ -719,6 +732,7 @@
 
         function passTurn() {
             if (myRole !== currentTurn || gameOver) return;
+            pendingCardAction = null;
             recallTiles(); // don't lose any tiles staged on the board
             socket.emit('pass_turn', { roomCode: currentRoomCode });
         }
