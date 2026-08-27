@@ -183,18 +183,23 @@ function evalSide(tokens) {
 }
 
 // tokens: array of display symbols for a full line/sequence of cells.
+// tokens: array of display symbols for a full line/sequence of cells.
+// Supports chained equalities (A=B=C=...) — every segment split by '=' must evaluate to the same value.
 function validateEquation(tokens) {
   if (tokens.length < 3) return false;
-  const eqPositions = [];
-  tokens.forEach((t, i) => { if (t === '=') eqPositions.push(i); });
-  if (eqPositions.length !== 1) return false;
-  const idx = eqPositions[0];
-  if (idx === 0 || idx === tokens.length - 1) return false;
 
-  const left = evalSide(tokens.slice(0, idx));
-  const right = evalSide(tokens.slice(idx + 1));
-  if (left === null || right === null) return false;
-  return Math.abs(left - right) < 1e-9;
+  const segments = [[]];
+  for (const t of tokens) {
+    if (t === '=') segments.push([]);
+    else segments[segments.length - 1].push(t);
+  }
+  if (segments.length < 2) return false; // need at least one '='
+
+  const values = segments.map(evalSide);
+  if (values.some(v => v === null)) return false;
+
+  const first = values[0];
+  return values.every(v => Math.abs(v - first) < 1e-9);
 }
 
 // ---------------------------------------------------------------------------
