@@ -661,6 +661,20 @@ io.on('connection', (socket) => {
     socket.to(roomCode).emit('opponent_used_card', { cardId, effect: result.opponentInfo || null, hand: room.hands[opp] });
   });
 
+  socket.on('resign', ({ roomCode }) => {
+    const room = rooms[roomCode];
+    if (!room || room.gameOver) return;
+    const player = findPlayer(room, socket.id);
+    if (!player) return;
+
+    room.gameOver = {
+      winner: otherRole(player.role),
+      scores: room.scores,
+      reason: 'resign'
+    };
+    io.to(roomCode).emit('game_over', room.gameOver);
+  });
+
   socket.on('sync_timers', ({ roomCode, timers }) => {
     const room = rooms[roomCode];
     if (!room || !timers) return;
