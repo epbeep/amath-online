@@ -94,7 +94,9 @@
 
     <div class="header">
         <h1>A-MATH ONLINE</h1>
-        <p>รหัสห้อง: <span id="displayRoomCode" style="color: #facc15; font-weight: bold;">-</span> | บทบาท: <span id="displayRole" style="color: #38bdf8;">-</span></p>
+        <p>รหัสห้อง: <span id="displayRoomCode" style="color: #facc15; font-weight: bold;">-</span>
+            <button id="copyRoomBtn" onclick="copyRoomCode()" title="คัดลอกรหัสห้อง" style="background:#334155; color:#38bdf8; border:1px solid #475569; border-radius:6px; padding:2px 8px; font-size:12px; cursor:pointer; margin-left:4px;">📋 คัดลอก</button>
+            | บทบาท: <span id="displayRole" style="color: #38bdf8;">-</span></p>
     </div>
 
     <div class="score-board">
@@ -193,6 +195,33 @@
         function joinRoom() {
             const code = document.getElementById('roomCodeInput').value;
             if (code) socket.emit('join_room', { roomCode: code, sessionId });
+        }
+
+        function copyRoomCode() {
+            if (!currentRoomCode) return;
+            const btn = document.getElementById('copyRoomBtn');
+            const done = () => {
+                const original = btn.textContent;
+                btn.textContent = '✅ คัดลอกแล้ว';
+                setTimeout(() => { btn.textContent = original; }, 1500);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(currentRoomCode).then(done).catch(() => fallbackCopy(currentRoomCode, done));
+            } else {
+                fallbackCopy(currentRoomCode, done);
+            }
+        }
+
+        function fallbackCopy(text, done) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
+            document.body.removeChild(ta);
         }
 
         socket.on('connect', () => {
