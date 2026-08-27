@@ -1,754 +1,721 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-const publicPath = path.join(__dirname, 'public');
-app.use(express.static(publicPath));
-
-app.use((req, res) => {
-  res.sendFile(path.join(publicPath, 'index.html'));
-});
-
-// ---------------------------------------------------------------------------
-// Tile pool config
-// ---------------------------------------------------------------------------
-const A_MATH_CONFIG = [
-  { symbol: "0", count: 5, score: 1, type: "number" },
-  { symbol: "1", count: 6, score: 1, type: "number" },
-  { symbol: "2", count: 6, score: 1, type: "number" },
-  { symbol: "3", count: 5, score: 1, type: "number" },
-  { symbol: "4", count: 5, score: 2, type: "number" },
-  { symbol: "5", count: 4, score: 2, type: "number" },
-  { symbol: "6", count: 4, score: 2, type: "number" },
-  { symbol: "7", count: 4, score: 2, type: "number" },
-  { symbol: "8", count: 4, score: 2, type: "number" },
-  { symbol: "9", count: 4, score: 2, type: "number" },
-  { symbol: "10", count: 2, score: 3, type: "number" },
-  { symbol: "11", count: 1, score: 4, type: "number" },
-  { symbol: "12", count: 2, score: 3, type: "number" },
-  { symbol: "13", count: 1, score: 6, type: "number" },
-  { symbol: "14", count: 1, score: 4, type: "number" },
-  { symbol: "15", count: 1, score: 4, type: "number" },
-  { symbol: "16", count: 1, score: 4, type: "number" },
-  { symbol: "17", count: 1, score: 6, type: "number" },
-  { symbol: "18", count: 1, score: 4, type: "number" },
-  { symbol: "19", count: 1, score: 7, type: "number" },
-  { symbol: "20", count: 1, score: 5, type: "number" },
-  { symbol: "+", count: 4, score: 2, type: "operator" },
-  { symbol: "-", count: 4, score: 2, type: "operator" },
-  { symbol: "+/-", count: 5, score: 1, type: "operator" },
-  { symbol: "x", count: 4, score: 2, type: "operator" },
-  { symbol: "÷", count: 4, score: 2, type: "operator" },
-  { symbol: "x/÷", count: 4, score: 1, type: "operator" },
-  { symbol: "=", count: 11, score: 1, type: "equal" },
-  { symbol: "BLANK", count: 4, score: 0, type: "wildcard" }
-];
-
-const BOARD_LAYOUT = [
-  ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "3E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"],
-  ["NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL"],
-  ["NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL"],
-  ["2P", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "2P"],
-  ["NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL"],
-  ["NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL"],
-  ["NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL"],
-  ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "CENTER", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"],
-  ["NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL"],
-  ["NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL"],
-  ["NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL"],
-  ["2P", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "2P"],
-  ["NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL"],
-  ["NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL"],
-  ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "3E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"]
-];
-
-const CENTER_ROW = 7, CENTER_COL = 7;
-const OPERATORS = ['+', '-', 'x', '÷'];
-const BINGO_BONUS = 40; // bonus for using all 8 tiles from hand in a single turn
-
-// ---------------------------------------------------------------------------
-// Item cards
-// ---------------------------------------------------------------------------
-const CARD_DRAW_COOLDOWN_TURNS = 5;
-const MAX_CARDS_IN_HAND = 2;
-
-// weight = relative draw chance; higher stars = lower weight
-const CARD_POOL = [
-  { id: 'freeze_time', name: 'แช่แข็งเวลา', stars: 2, weight: 30 },
-  { id: 'disable_specials', name: 'ยกเลิกช่องพิเศษ', stars: 2, weight: 30 },
-  { id: 'free_blank', name: 'วางแทน BLANK ฟรี', stars: 3, weight: 20 },
-  { id: 'cell_lock', name: 'ล็อกช่อง', stars: 3, weight: 20 },
-  { id: 'tile_swap_3', name: 'สลับเบี้ยคู่แข่ง 3 ตัว', stars: 4, weight: 10 },
-  { id: 'double_score', name: 'Double Score', stars: 4, weight: 10 },
-  { id: 'equal_strike', name: 'Equal Strike', stars: 4, weight: 10 },
-  { id: 'swap_rack', name: 'Swap Rack', stars: 5, weight: 5 }
-];
-
-function drawRandomCard() {
-  const totalWeight = CARD_POOL.reduce((s, c) => s + c.weight, 0);
-  let roll = Math.random() * totalWeight;
-  for (const card of CARD_POOL) {
-    if (roll < card.weight) return card;
-    roll -= card.weight;
-  }
-  return CARD_POOL[CARD_POOL.length - 1];
-}
-
-function createShuffledBag() {
-  const bag = [];
-  let idx = 0;
-  A_MATH_CONFIG.forEach(item => {
-    for (let i = 0; i < item.count; i++) {
-      bag.push({ id: `t_${Date.now()}_${idx++}_${Math.random().toString(36).slice(2, 6)}`, symbol: item.symbol, score: item.score, type: item.type });
-    }
-  });
-  return bag.sort(() => Math.random() - 0.5);
-}
-
-function isValidInitialHand(hand) {
-  const hasEqual = hand.some(t => t.symbol === '=' || t.symbol === 'BLANK');
-  const hasOperator = hand.some(t => ['+', '-', 'x', '÷', '+/-', 'x/÷', 'BLANK'].includes(t.symbol));
-  const hasNumber = hand.some(t => t.type === 'number' || t.symbol === 'BLANK');
-  return hasEqual && hasOperator && hasNumber;
-}
-
-function dealInitialHands() {
-  let bag = createShuffledBag();
-  let p1Hand = [], p2Hand = [];
-
-  let attempts = 0;
-  while (attempts < 100) {
-    p1Hand = bag.slice(0, 8);
-    if (isValidInitialHand(p1Hand)) { bag = bag.slice(8); break; }
-    bag.sort(() => Math.random() - 0.5);
-    attempts++;
-  }
-
-  attempts = 0;
-  while (attempts < 100) {
-    p2Hand = bag.slice(0, 8);
-    if (isValidInitialHand(p2Hand)) { bag = bag.slice(8); break; }
-    bag.sort(() => Math.random() - 0.5);
-    attempts++;
-  }
-
-  return { p1Hand, p2Hand, remainingBag: bag };
-}
-
-// ---------------------------------------------------------------------------
-// Equation validation & evaluation
-// ---------------------------------------------------------------------------
-function isNumberToken(tok) { return /^\d+$/.test(tok) && Number(tok) >= 0 && Number(tok) <= 20; }
-
-// Evaluate a token side (e.g. ["3","+","4","x","2"]) with x/÷ before +/-.
-// Returns a number, or null if malformed / invalid (e.g. divide by zero).
-function evalSide(tokens) {
-  if (tokens.length === 0 || tokens.length % 2 === 0) return null;
-  for (let i = 0; i < tokens.length; i++) {
-    if (i % 2 === 0 && !isNumberToken(tokens[i])) return null;
-    if (i % 2 === 1 && !OPERATORS.includes(tokens[i])) return null;
-  }
-  const nums = tokens.filter((_, i) => i % 2 === 0).map(Number);
-  const ops = tokens.filter((_, i) => i % 2 === 1);
-
-  const passNums = [nums[0]];
-  const passOps = [];
-  for (let i = 0; i < ops.length; i++) {
-    if (ops[i] === 'x' || ops[i] === '÷') {
-      const prev = passNums.pop();
-      const next = nums[i + 1];
-      if (ops[i] === 'x') passNums.push(prev * next);
-      else {
-        if (next === 0) return null;
-        passNums.push(prev / next);
-      }
-    } else {
-      passNums.push(nums[i + 1]);
-      passOps.push(ops[i]);
-    }
-  }
-
-  let result = passNums[0];
-  for (let i = 0; i < passOps.length; i++) {
-    result = passOps[i] === '+' ? result + passNums[i + 1] : result - passNums[i + 1];
-  }
-  return result;
-}
-
-// tokens: array of display symbols for a full line/sequence of cells.
-function validateEquation(tokens) {
-  if (tokens.length < 3) return false;
-  const eqPositions = [];
-  tokens.forEach((t, i) => { if (t === '=') eqPositions.push(i); });
-  if (eqPositions.length !== 1) return false;
-  const idx = eqPositions[0];
-  if (idx === 0 || idx === tokens.length - 1) return false;
-
-  const left = evalSide(tokens.slice(0, idx));
-  const right = evalSide(tokens.slice(idx + 1));
-  if (left === null || right === null) return false;
-  return Math.abs(left - right) < 1e-9;
-}
-
-// ---------------------------------------------------------------------------
-// Room state
-// ---------------------------------------------------------------------------
-const rooms = {};
-
-function generateRoomCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-function emptyGrid() {
-  return Array(15).fill(null).map(() => Array(15).fill(null));
-}
-
-function publicGridCells(grid) {
-  const cells = [];
-  for (let r = 0; r < 15; r++) {
-    for (let c = 0; c < 15; c++) {
-      if (grid[r][c]) cells.push({ row: r, col: c, tile: grid[r][c] });
-    }
-  }
-  return cells;
-}
-
-function otherRole(role) { return role === 'P1' ? 'P2' : 'P1'; }
-
-function advanceTurn(room, toRole) {
-  room.currentTurn = toRole;
-  if (room.cardCooldown[toRole] > 0) room.cardCooldown[toRole]--;
-}
-
-// clears one-shot effects that were scoped to `role`'s turn, once that turn is over
-function consumeEffectsFor(room, role) {
-  if (room.effects.disableSpecialsFor === role) room.effects.disableSpecialsFor = null;
-  if (room.effects.equalsLockedFor === role) room.effects.equalsLockedFor = null;
-  if (room.effects.cellLocked && room.effects.cellLocked.forRole === role) room.effects.cellLocked = null;
-  if (room.effects.doubleScoreFor === role) room.effects.doubleScoreFor = null;
-}
-
-function cardSnapshot(room, role) {
-  return { cardHand: room.cardHands[role], cooldown: room.cardCooldown[role] };
-}
-
-function findPlayer(room, socketId) {
-  return room.players.find(p => p.socketId === socketId);
-}
-
-function findPlayerBySession(room, sessionId) {
-  return room.players.find(p => p.sessionId === sessionId);
-}
-
-function sendState(socketId, room, role) {
-  io.to(socketId).emit('state_sync', {
-    role,
-    hand: room.hands[role],
-    gridCells: publicGridCells(room.grid),
-    scores: room.scores,
-    currentTurn: room.currentTurn,
-    timers: room.timers,
-    bagLeft: room.bag.length,
-    gameOver: room.gameOver || null,
-    cardHand: room.cardHands[role],
-    cardCooldown: room.cardCooldown[role]
-  });
-}
-
-// Attempts to build & validate the placement, returning either
-// { ok:true, score, gridUpdates } or { ok:false, reason }
-// `moverRole` and `room.effects` are consulted for active item-card effects.
-function evaluateMove(room, placements, moverRole) {
-  if (placements.length === 0) return { ok: false, reason: 'ไม่มีเบี้ยที่วาง' };
-
-  const rows = new Set(placements.map(p => p.row));
-  const cols = new Set(placements.map(p => p.col));
-  for (const p of placements) {
-    if (p.row < 0 || p.row > 14 || p.col < 0 || p.col > 14) return { ok: false, reason: 'ตำแหน่งนอกกระดาน' };
-    if (room.grid[p.row][p.col]) return { ok: false, reason: 'ช่องนี้มีเบี้ยอยู่แล้ว' };
-  }
-  // duplicate target cells within same submission
-  const seen = new Set();
-  for (const p of placements) {
-    const key = `${p.row},${p.col}`;
-    if (seen.has(key)) return { ok: false, reason: 'วางเบี้ยซ้อนกันไม่ได้' };
-    seen.add(key);
-  }
-
-  // --- item-card effects ---
-  const eq = room.effects;
-  if (eq.equalsLockedFor === moverRole && placements.some(p => p.displaySymbol === '=')) {
-    return { ok: false, reason: 'ตานี้ถูกล็อกด้วย Equal Strike ห้ามใช้เครื่องหมาย =' };
-  }
-  if (eq.cellLocked && eq.cellLocked.forRole === moverRole) {
-    const { row, col } = eq.cellLocked;
-    if (placements.some(p => p.row === row && p.col === col)) {
-      return { ok: false, reason: 'ช่องนี้ถูกล็อกไว้ตานี้' };
-    }
-  }
-  const specialsDisabled = eq.disableSpecialsFor === moverRole;
-  const scoreMultiplier = eq.doubleScoreFor === moverRole ? 2 : 1;
-
-  if (placements.length > 1 && rows.size > 1 && cols.size > 1) {
-    return { ok: false, reason: 'ต้องวางเบี้ยเป็นแนวเดียวกัน (แนวนอนหรือแนวตั้ง)' };
-  }
-
-  const boardEmpty = room.grid.every(row => row.every(cell => !cell));
-  if (boardEmpty) {
-    const coversCenter = placements.some(p => p.row === CENTER_ROW && p.col === CENTER_COL);
-    if (!coversCenter) return { ok: false, reason: 'ตาแรกต้องวางทับช่องดาวตรงกลาง' };
-  }
-
-  // Build a temp lookup: symbol/score at (r,c), either from existing grid or new placement
-  const at = (r, c) => {
-    const p = placements.find(pl => pl.row === r && pl.col === c);
-    if (p) return { symbol: p.displaySymbol, score: p.baseScore, isNew: true };
-    if (room.grid[r][c]) return { symbol: room.grid[r][c].symbol, score: room.grid[r][c].score, isNew: false };
-    return null;
-  };
-
-  function buildSequence(row, col, dir) {
-    // dir: 'H' or 'V'. Walk backward then forward through filled cells.
-    let r = row, c = col;
-    while (true) {
-      const pr = dir === 'H' ? r : r - 1;
-      const pc = dir === 'H' ? c - 1 : c;
-      if (at(pr, pc)) { r = pr; c = pc; } else break;
-    }
-    const cells = [];
-    let cr = r, cc = c;
-    while (at(cr, cc)) {
-      cells.push({ row: cr, col: cc, ...at(cr, cc) });
-      if (dir === 'H') cc++; else cr++;
-    }
-    return cells;
-  }
-
-  let mainDir;
-  if (rows.size === 1 && placements.length > 1) mainDir = 'H';
-  else if (cols.size === 1 && placements.length > 1) mainDir = 'V';
-  else {
-    // single tile placed: pick whichever direction actually has neighbors
-    const p = placements[0];
-    const hSeq = buildSequence(p.row, p.col, 'H');
-    const vSeq = buildSequence(p.row, p.col, 'V');
-    if (hSeq.length > 1) mainDir = 'H';
-    else if (vSeq.length > 1) mainDir = 'V';
-    else if (boardEmpty) return { ok: false, reason: 'ต้องวางเบี้ยอย่างน้อยให้ครบสมการ (เช่น 5=5)' };
-    else return { ok: false, reason: 'เบี้ยที่วางไม่ได้เชื่อมกับเบี้ยเดิมบนกระดาน' };
-  }
-
-  const anchor = placements[0];
-  const mainSeq = buildSequence(anchor.row, anchor.col, mainDir);
-
-  // connectivity check (non-first moves must touch existing tiles somewhere)
-  const touchesExisting = mainSeq.some(c => !c.isNew) ;
-
-  const sequences = [{ tokens: mainSeq.map(c => c.symbol), cells: mainSeq }];
-
-  // cross-check sequences for every newly placed tile, in the perpendicular direction
-  let anyCrossTouches = false;
-  for (const p of placements) {
-    const crossDir = mainDir === 'H' ? 'V' : 'H';
-    const crossSeq = buildSequence(p.row, p.col, crossDir);
-    if (crossSeq.length > 1) {
-      anyCrossTouches = true;
-      sequences.push({ tokens: crossSeq.map(c => c.symbol), cells: crossSeq });
-    }
-  }
-
-  if (!boardEmpty && !touchesExisting && !anyCrossTouches) {
-    return { ok: false, reason: 'เบี้ยที่วางไม่ได้เชื่อมกับเบี้ยเดิมบนกระดาน' };
-  }
-
-  for (const seq of sequences) {
-    if (!validateEquation(seq.tokens)) {
-      return { ok: false, reason: `สมการไม่ถูกต้อง: ${seq.tokens.join(' ')}` };
-    }
-  }
-
-  // scoring
-  let totalScore = 0;
-  for (const seq of sequences) {
-    let seqSum = 0;
-    let eqMultiplier = 1;
-    for (const cell of seq.cells) {
-      let cellScore = cell.score;
-      if (cell.isNew && !specialsDisabled) {
-        const cellType = BOARD_LAYOUT[cell.row][cell.col];
-        if (cellType === '2P') cellScore *= 2;
-        else if (cellType === '3P') cellScore *= 3;
-        else if (cellType === '2E') eqMultiplier = Math.max(eqMultiplier, 2);
-        else if (cellType === '3E') eqMultiplier = Math.max(eqMultiplier, 3);
-      }
-      seqSum += cellScore;
-    }
-    totalScore += seqSum * eqMultiplier;
-  }
-  totalScore *= scoreMultiplier;
-
-  const gridUpdates = placements.map(p => ({
-    row: p.row, col: p.col,
-    tile: { symbol: p.displaySymbol, score: p.baseScore, tileId: p.tileId, isBlank: p.isBlank }
-  }));
-
-  return { ok: true, score: totalScore, gridUpdates };
-}
-
-io.on('connection', (socket) => {
-  socket.on('create_room', ({ sessionId } = {}) => {
-    const roomCode = generateRoomCode();
-    const deal = dealInitialHands();
-
-    rooms[roomCode] = {
-      players: [{ sessionId, socketId: socket.id, role: 'P1' }],
-      hands: { P1: deal.p1Hand, P2: deal.p2Hand },
-      grid: emptyGrid(),
-      bag: deal.remainingBag,
-      currentTurn: 'P1',
-      scores: { P1: 0, P2: 0 },
-      timers: { P1: 600, P2: 600 },
-      gameOver: null,
-      passCount: 0,
-      cardHands: { P1: [], P2: [] },
-      cardCooldown: { P1: 0, P2: 0 },
-      // one-shot effects, consumed by the next relevant turn
-      effects: {
-        disableSpecialsFor: null,   // role: their next move ignores 2P/3P/2E/3E
-        equalsLockedFor: null,      // role: their next move can't place '='
-        cellLocked: null,           // { row, col, forRole }
-        doubleScoreFor: null        // role: their own next move's equation score x2
-      }
-    };
-
-    socket.join(roomCode);
-    socket.emit('room_created', { roomCode, role: 'P1' });
-  });
-
-  socket.on('join_room', ({ roomCode, sessionId } = {}) => {
-    const code = (roomCode || '').trim().toUpperCase();
-    const room = rooms[code];
-
-    if (!room) { socket.emit('error_msg', 'ไม่พบรหัสห้องนี้'); return; }
-    if (room.players.length >= 2) { socket.emit('error_msg', 'ห้องนี้เต็มแล้ว'); return; }
-
-    room.players.push({ sessionId, socketId: socket.id, role: 'P2' });
-    socket.join(code);
-
-    socket.emit('room_joined', { roomCode: code, role: 'P2' });
-
-    const p1 = room.players.find(p => p.role === 'P1');
-    sendState(p1.socketId, room, 'P1');
-    sendState(socket.id, room, 'P2');
-    io.to(code).emit('game_ready');
-  });
-
-  socket.on('rejoin_room', ({ roomCode, sessionId } = {}) => {
-    const code = (roomCode || '').trim().toUpperCase();
-    const room = rooms[code];
-    if (!room || !sessionId) { socket.emit('rejoin_failed'); return; }
-
-    const player = findPlayerBySession(room, sessionId);
-    if (!player) { socket.emit('rejoin_failed'); return; }
-
-    player.socketId = socket.id;
-    socket.join(code);
-    sendState(socket.id, room, player.role);
-    socket.to(code).emit('opponent_reconnected');
-  });
-
-  socket.on('submit_move', ({ roomCode, placements }) => {
-    const room = rooms[roomCode];
-    if (!room || room.gameOver) return;
-    const player = findPlayer(room, socket.id);
-    if (!player) return;
-    if (room.currentTurn !== player.role) { socket.emit('move_rejected', { reason: 'ยังไม่ถึงตาคุณ' }); return; }
-
-    const hand = room.hands[player.role];
-    const enriched = [];
-    for (const p of placements || []) {
-      const tile = hand.find(t => t && t.id === p.tileId);
-      if (!tile) { socket.emit('move_rejected', { reason: 'เบี้ยไม่อยู่ในมือคุณ' }); return; }
-      enriched.push({
-        row: p.row, col: p.col, tileId: tile.id,
-        displaySymbol: p.displaySymbol || tile.symbol,
-        baseScore: tile.score, isBlank: tile.symbol === 'BLANK'
-      });
-    }
-
-    const result = evaluateMove(room, enriched, player.role);
-    if (!result.ok) { socket.emit('move_rejected', { reason: result.reason }); return; }
-
-    // apply grid updates
-    result.gridUpdates.forEach(u => { room.grid[u.row][u.col] = u.tile; });
-
-    // bingo bonus: used every tile from a full 8-tile hand in one turn
-    const usedIds = new Set(enriched.map(e => e.tileId));
-    const isBingo = hand.length === 8 && usedIds.size === 8;
-    const bonus = isBingo ? BINGO_BONUS : 0;
-
-    // remove used tiles from hand, refill from bag
-    room.hands[player.role] = hand.filter(t => t && !usedIds.has(t.id));
-    const needRefill = 8 - room.hands[player.role].length;
-    const refill = room.bag.splice(0, Math.min(needRefill, room.bag.length));
-    room.hands[player.role].push(...refill);
-
-    room.scores[player.role] += result.score + bonus;
-    room.passCount = 0;
-    consumeEffectsFor(room, player.role);
-    advanceTurn(room, otherRole(player.role));
-
-    socket.emit('move_accepted', {
-      hand: room.hands[player.role],
-      scores: room.scores,
-      currentTurn: room.currentTurn,
-      bagLeft: room.bag.length,
-      gridUpdates: result.gridUpdates,
-      gainedScore: result.score,
-      bonus,
-      card: cardSnapshot(room, player.role)
-    });
-    socket.to(roomCode).emit('opponent_moved', {
-      gridUpdates: result.gridUpdates,
-      scores: room.scores,
-      currentTurn: room.currentTurn,
-      bagLeft: room.bag.length,
-      bonus
-    });
-
-    checkGameOver(room, roomCode, player.role);
-  });
-
-  socket.on('pass_turn', ({ roomCode }) => {
-    const room = rooms[roomCode];
-    if (!room || room.gameOver) return;
-    const player = findPlayer(room, socket.id);
-    if (!player) return;
-    if (room.currentTurn !== player.role) { socket.emit('move_rejected', { reason: 'ยังไม่ถึงตาคุณ' }); return; }
-
-    room.passCount = (room.passCount || 0) + 1;
-    consumeEffectsFor(room, player.role);
-    advanceTurn(room, otherRole(player.role));
-
-    socket.emit('turn_passed', { currentTurn: room.currentTurn, card: cardSnapshot(room, player.role) });
-    socket.to(roomCode).emit('opponent_moved', {
-      gridUpdates: [], scores: room.scores, currentTurn: room.currentTurn, bagLeft: room.bag.length
-    });
-
-    // if both players pass back-to-back, the game is stuck — end it with current scores
-    if (room.passCount >= 2) {
-      room.gameOver = {
-        winner: room.scores.P1 === room.scores.P2 ? null : (room.scores.P1 > room.scores.P2 ? 'P1' : 'P2'),
-        scores: room.scores,
-        reason: 'both_passed'
-      };
-      io.to(roomCode).emit('game_over', room.gameOver);
-    }
-  });
-
-  socket.on('swap_hand', ({ roomCode, tileIds }) => {
-    const room = rooms[roomCode];
-    if (!room || room.gameOver) return;
-    const player = findPlayer(room, socket.id);
-    if (!player) return;
-    if (room.currentTurn !== player.role) { socket.emit('move_rejected', { reason: 'ยังไม่ถึงตาคุณ' }); return; }
-    if (room.bag.length < 1) { socket.emit('move_rejected', { reason: 'ถุงเบี้ยไม่พอให้แลกแล้ว' }); return; }
-
-    const hand = room.hands[player.role];
-    const idSet = new Set(tileIds || hand.map(t => t.id));
-    const toSwap = hand.filter(t => idSet.has(t.id));
-    const keep = hand.filter(t => !idSet.has(t.id));
-
-    room.bag.push(...toSwap);
-    room.bag.sort(() => Math.random() - 0.5);
-
-    const draw = room.bag.splice(0, Math.min(toSwap.length, room.bag.length));
-    room.hands[player.role] = [...keep, ...draw];
-    room.passCount = 0;
-    consumeEffectsFor(room, player.role);
-    advanceTurn(room, otherRole(player.role));
-
-    socket.emit('hand_swapped', {
-      hand: room.hands[player.role],
-      currentTurn: room.currentTurn,
-      bagLeft: room.bag.length,
-      card: cardSnapshot(room, player.role)
-    });
-    socket.to(roomCode).emit('opponent_moved', {
-      gridUpdates: [], scores: room.scores, currentTurn: room.currentTurn, bagLeft: room.bag.length
-    });
-  });
-
-  // --- item cards ---------------------------------------------------------
-
-  socket.on('draw_card', ({ roomCode }) => {
-    const room = rooms[roomCode];
-    if (!room || room.gameOver) return;
-    const player = findPlayer(room, socket.id);
-    if (!player) return;
-    if (room.currentTurn !== player.role) { socket.emit('move_rejected', { reason: 'ยังไม่ถึงตาคุณ' }); return; }
-    if (room.cardCooldown[player.role] > 0) {
-      socket.emit('move_rejected', { reason: `ต้องรออีก ${room.cardCooldown[player.role]} ตาถึงจะสุ่มการ์ดได้อีก` });
-      return;
-    }
-    if (room.cardHands[player.role].length >= MAX_CARDS_IN_HAND) {
-      socket.emit('move_rejected', { reason: 'มือการ์ดเต็มแล้ว (สูงสุด 2 ใบ) ใช้การ์ดก่อนถึงจะสุ่มใหม่ได้' });
-      return;
-    }
-
-    const card = drawRandomCard();
-    const instance = { instanceId: `card_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, cardId: card.id };
-    room.cardHands[player.role].push(instance);
-    room.cardCooldown[player.role] = CARD_DRAW_COOLDOWN_TURNS;
-
-    // drawing a card uses up the whole turn, like a pass
-    room.passCount = 0;
-    advanceTurn(room, otherRole(player.role));
-
-    socket.emit('card_drawn', {
-      card: { instanceId: instance.instanceId, cardId: card.id, name: card.name, stars: card.stars },
-      currentTurn: room.currentTurn,
-      cardHand: room.cardHands[player.role],
-      cooldown: room.cardCooldown[player.role]
-    });
-    socket.to(roomCode).emit('opponent_moved', {
-      gridUpdates: [], scores: room.scores, currentTurn: room.currentTurn, bagLeft: room.bag.length
-    });
-    socket.to(roomCode).emit('opponent_drew_card');
-  });
-
-  socket.on('use_card', ({ roomCode, instanceId, payload }) => {
-    const room = rooms[roomCode];
-    if (!room || room.gameOver) return;
-    const player = findPlayer(room, socket.id);
-    if (!player) return;
-    if (room.currentTurn !== player.role) { socket.emit('move_rejected', { reason: 'ใช้การ์ดได้เฉพาะตาตัวเองเท่านั้น' }); return; }
-
-    const cardHand = room.cardHands[player.role];
-    const idx = cardHand.findIndex(c => c.instanceId === instanceId);
-    if (idx === -1) { socket.emit('move_rejected', { reason: 'ไม่พบการ์ดใบนี้ในมือคุณ' }); return; }
-    const cardId = cardHand[idx].cardId;
-    const opp = otherRole(player.role);
-
-    const result = applyCardEffect(room, player.role, opp, cardId, payload || {});
-    if (!result.ok) { socket.emit('move_rejected', { reason: result.reason }); return; }
-
-    cardHand.splice(idx, 1); // consume the card — using a card is a free action, doesn't end the turn
-
-    socket.emit('card_used', { cardId, cardHand: room.cardHands[player.role], effect: result.publicInfo || null, hand: room.hands[player.role] });
-    socket.to(roomCode).emit('opponent_used_card', { cardId, effect: result.opponentInfo || null, hand: room.hands[opp] });
-  });
-
-  socket.on('sync_timers', ({ roomCode, timers }) => {
-    const room = rooms[roomCode];
-    if (!room || !timers) return;
-    room.timers = timers;
-  });
-
-  socket.on('disconnect', () => {
-    for (const code in rooms) {
-      const room = rooms[code];
-      const player = findPlayer(room, socket.id);
-      if (player) {
-        socket.to(code).emit('opponent_left', 'ผู้เล่นอีกฝ่ายหลุดการเชื่อมต่อ (กำลังรอเชื่อมต่อใหม่...)');
-        break;
-      }
-    }
-  });
-});
-
-// Applies one card's effect to room state. Returns { ok, reason? , publicInfo?, opponentInfo? }
-function applyCardEffect(room, role, opp, cardId, payload) {
-  switch (cardId) {
-    case 'freeze_time': {
-      room.timers[role] += 60;
-      return { ok: true, publicInfo: { type: 'freeze_time', timers: room.timers }, opponentInfo: { type: 'freeze_time', timers: room.timers } };
-    }
-    case 'disable_specials': {
-      room.effects.disableSpecialsFor = opp;
-      return { ok: true, publicInfo: { type: 'disable_specials' }, opponentInfo: { type: 'disable_specials' } };
-    }
-    case 'equal_strike': {
-      room.effects.equalsLockedFor = opp;
-      return { ok: true, publicInfo: { type: 'equal_strike' }, opponentInfo: { type: 'equal_strike' } };
-    }
-    case 'double_score': {
-      room.effects.doubleScoreFor = role;
-      return { ok: true, publicInfo: { type: 'double_score' } };
-    }
-    case 'cell_lock': {
-      const { row, col } = payload;
-      if (typeof row !== 'number' || typeof col !== 'number' || row < 0 || row > 14 || col < 0 || col > 14) {
-        return { ok: false, reason: 'ตำแหน่งช่องไม่ถูกต้อง' };
-      }
-      if (room.grid[row][col]) return { ok: false, reason: 'ช่องนี้มีเบี้ยอยู่แล้ว เลือกช่องว่างเท่านั้น' };
-      room.effects.cellLocked = { row, col, forRole: opp };
-      return { ok: true, publicInfo: { type: 'cell_lock', row, col }, opponentInfo: { type: 'cell_lock', row, col } };
-    }
-    case 'free_blank': {
-      const discardId = payload.discardTileId;
-      const hand = room.hands[role];
-      const idx = hand.findIndex(t => t && t.id === discardId);
-      if (idx === -1) return { ok: false, reason: 'ต้องเลือกเบี้ยในมือ 1 ใบเพื่อแลกทิ้ง' };
-      const discarded = hand[idx];
-      room.bag.push(discarded);
-      room.bag.sort(() => Math.random() - 0.5);
-      const newBlank = { id: `blank_bonus_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, symbol: 'BLANK', score: 0, type: 'wildcard' };
-      hand.splice(idx, 1, newBlank);
-      return { ok: true, publicInfo: { type: 'free_blank', hand: room.hands[role] } };
-    }
-    case 'tile_swap_3': {
-      const giveIds = payload.tileIds;
-      if (!Array.isArray(giveIds) || giveIds.length !== 3) return { ok: false, reason: 'ต้องเลือกเบี้ยของตัวเอง 3 ใบ' };
-      const hand = room.hands[role];
-      const oppHand = room.hands[opp];
-      const giveTiles = giveIds.map(id => hand.find(t => t && t.id === id)).filter(Boolean);
-      if (giveTiles.length !== 3) return { ok: false, reason: 'เบี้ยที่เลือกไม่อยู่ในมือคุณ' };
-      if (oppHand.length === 0) return { ok: false, reason: 'คู่แข่งไม่มีเบี้ยให้แลก' };
-
-      const giveIdSet = new Set(giveTiles.map(t => t.id));
-      room.hands[role] = hand.filter(t => !giveIdSet.has(t.id));
-
-      const shuffledOpp = [...oppHand].sort(() => Math.random() - 0.5);
-      const takeTiles = shuffledOpp.slice(0, Math.min(3, shuffledOpp.length));
-      const takeIdSet = new Set(takeTiles.map(t => t.id));
-      room.hands[opp] = oppHand.filter(t => !takeIdSet.has(t.id));
-
-      room.hands[role].push(...takeTiles);
-      room.hands[opp].push(...giveTiles);
-
-      return { ok: true, publicInfo: { type: 'tile_swap_3', hand: room.hands[role] }, opponentInfo: { type: 'tile_swap_3', hand: room.hands[opp] } };
-    }
-    case 'swap_rack': {
-      const tmp = room.hands[role];
-      room.hands[role] = room.hands[opp];
-      room.hands[opp] = tmp;
-      return { ok: true, publicInfo: { type: 'swap_rack', hand: room.hands[role] }, opponentInfo: { type: 'swap_rack', hand: room.hands[opp] } };
-    }
-    default:
-      return { ok: false, reason: 'ไม่รู้จักการ์ดนี้' };
-  }
-}
-
-function checkGameOver(room, roomCode, moverRole) {
-  const moverHandEmpty = room.hands[moverRole].length === 0;
-  if (room.bag.length === 0 && moverHandEmpty) {
-    const other = otherRole(moverRole);
-    const otherHandValue = room.hands[other].reduce((s, t) => s + t.score, 0);
-    room.scores[moverRole] += otherHandValue;
-    room.scores[other] -= otherHandValue;
-    room.gameOver = {
-      winner: room.scores.P1 === room.scores.P2 ? null : (room.scores.P1 > room.scores.P2 ? 'P1' : 'P2'),
-      scores: room.scores
-    };
-    io.to(roomCode).emit('game_over', room.gameOver);
-  }
-}
-
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => { console.log(`Server running on port ${PORT}`); });
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A-Math Online Real-time</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Kanit', 'Segoe UI', Tahoma, sans-serif; user-select: none; }
+        body { background-color: #1e293b; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+
+        .lobby-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; gap: 20px; }
+        .lobby-card { background: #334155; padding: 30px; border-radius: 16px; border: 2px solid #475569; display: flex; flex-direction: column; gap: 15px; width: 340px; text-align: center; }
+        .input-box { padding: 10px; border-radius: 8px; border: 1px solid #64748b; background: #1e293b; color: white; font-size: 16px; text-align: center; text-transform: uppercase; }
+
+        .header { text-align: center; margin-bottom: 10px; }
+        .header h1 { font-size: 24px; color: #38bdf8; }
+
+        .score-board { display: flex; gap: 25px; background-color: #334155; padding: 12px 24px; border-radius: 12px; margin-bottom: 10px; font-weight: bold; border: 1px solid #475569; }
+        .player-info { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .timer-box { font-size: 18px; color: #ef4444; font-family: monospace; background: #1e293b; padding: 2px 8px; border-radius: 6px; }
+        .timer-box.active { color: #22c55e; border: 1px solid #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
+
+        .game-container { display: flex; flex-direction: column; align-items: center; gap: 12px; background-color: #0f172a; padding: 15px; border-radius: 16px; border: 3px solid #334155; }
+        .board { display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr); gap: 2px; width: min(80vw, 540px); height: min(80vw, 540px); background-color: #334155; padding: 3px; border-radius: 6px; }
+
+        .cell { background-color: #e2e8f0; border-radius: 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: #1e293b; cursor: pointer; position: relative; }
+        .cell.type-3E { background-color: #ef4444; color: #ffffff; }
+        .cell.type-2E { background-color: #facc15; color: #1e293b; }
+        .cell.type-3P { background-color: #0284c7; color: #ffffff; }
+        .cell.type-2P { background-color: #f97316; color: #ffffff; }
+        .cell.center-star { background-color: #facc15; color: #ef4444; font-size: 18px; }
+
+        .cell-label { font-size: 9px; text-align: center; line-height: 1; pointer-events: none; }
+
+        .tile { width: 90%; height: 90%; background: linear-gradient(145deg, #fef08a, #fde047); border: 1px solid #ca8a04; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: #713f12; position: relative; cursor: pointer; }
+        .tile.placed-permanently { background: #cbd5e1; border-color: #94a3b8; color: #334155; }
+        .tile.selected { outline: 3px solid #38bdf8; box-shadow: 0 0 8px #38bdf8; }
+        .tile .tile-score { position: absolute; bottom: 1px; right: 2px; font-size: 8px; color: #854d0e; }
+
+        .rack { display: flex; gap: 6px; background-color: #334155; padding: 8px; border-radius: 10px; min-height: 50px; }
+        .rack-slot { width: 38px; height: 42px; background-color: #1e293b; border-radius: 4px; border: 1px dashed #64748b; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+        .btn { background-color: #22c55e; color: white; border: none; padding: 10px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+        .btn:hover { opacity: 0.9; }
+        .btn:disabled { background-color: #64748b; cursor: not-allowed; }
+        .btn-swap { background-color: #a855f7; color: white; }
+        .btn-swap:hover { background-color: #9333ea; }
+
+        .status-msg { font-size: 13px; color: #38bdf8; font-weight: bold; height: 18px; }
+        .status-msg.error { color: #ef4444; }
+
+        .card-panel { display: flex; align-items: center; gap: 10px; background-color: #334155; padding: 8px 12px; border-radius: 10px; }
+        .card-item { display: flex; flex-direction: column; align-items: center; gap: 4px; background: #1e293b; border: 1px solid #64748b; border-radius: 8px; padding: 6px 8px; min-width: 70px; }
+        .card-item .card-name { font-size: 10px; text-align: center; line-height: 1.2; }
+        .card-item .card-stars { font-size: 9px; color: #facc15; }
+        .card-item button { font-size: 10px; padding: 3px 8px; }
+        .card-item.targeting { outline: 2px solid #38bdf8; }
+        .cell.targetable { outline: 2px dashed #38bdf8; cursor: crosshair; }
+        .cell.locked-cell { outline: 3px solid #ef4444; }
+    </style>
+</head>
+<body>
+
+    <div id="lobbyModal" class="lobby-overlay">
+        <h1 style="color: #38bdf8;">A-Math Online</h1>
+        <div class="lobby-card">
+            <button class="btn" onclick="createRoom()">สร้างห้องใหม่ (Create Room)</button>
+            <hr style="border-color: #475569;">
+            <input type="text" id="roomCodeInput" class="input-box" placeholder="กรอกรหัสห้อง 6 หลัก" maxlength="6">
+            <button class="btn" style="background-color: #0284c7;" onclick="joinRoom()">เข้าร่วมห้อง (Join)</button>
+            <div id="lobbyError" style="color: #ef4444; font-size: 13px;"></div>
+        </div>
+    </div>
+
+    <!-- Modal เลือกค่าเบี้ย Blank และเครื่องหมายผสม -->
+    <div id="blankModal" class="lobby-overlay" style="display: none; z-index: 200;">
+        <div class="lobby-card" style="width: 360px; max-height: 80vh; overflow-y: auto;">
+            <h3 id="modalTitle" style="color: #38bdf8;">เลือกสัญลักษณ์</h3>
+            <div id="modalContent" style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;"></div>
+        </div>
+    </div>
+
+    <!-- Modal จบเกม -->
+    <div id="gameOverModal" class="lobby-overlay" style="display: none; z-index: 250;">
+        <div class="lobby-card">
+            <h2 id="gameOverTitle" style="color: #facc15;">จบเกม!</h2>
+            <div id="gameOverBody" style="font-size: 15px;"></div>
+            <button class="btn" onclick="location.reload()">เล่นใหม่</button>
+        </div>
+    </div>
+
+    <div class="header">
+        <h1>A-MATH ONLINE</h1>
+        <p>รหัสห้อง: <span id="displayRoomCode" style="color: #facc15; font-weight: bold;">-</span> | บทบาท: <span id="displayRole" style="color: #38bdf8;">-</span></p>
+    </div>
+
+    <div class="score-board">
+        <div class="player-info">
+            <span>คุณ (You)</span>
+            <div>คะแนน: <span id="myScore" style="color: #facc15;">0</span></div>
+            <div id="myTimer" class="timer-box">10:00</div>
+        </div>
+        <div style="border-left: 1px solid #64748b; margin: 0 5px;"></div>
+        <div class="player-info">
+            <span>คู่แข่ง (Opponent)</span>
+            <div>คะแนน: <span id="oppScore" style="color: #facc15;">0</span></div>
+            <div id="oppTimer" class="timer-box">10:00</div>
+        </div>
+    </div>
+
+    <div class="game-container">
+        <div class="status-msg" id="statusMsg">สร้างหรือเข้าร่วมห้องเพื่อเริ่มเล่น</div>
+        <div id="board" class="board"></div>
+        <div id="rack" class="rack"></div>
+        <div class="controls" style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">
+            <button id="submitBtn" class="btn" onclick="submitMove()" disabled>ส่งคำตอบ (PLAY)</button>
+            <button id="swapBtn" class="btn btn-swap" onclick="swapTiles()" disabled>สุ่มเบี้ยใหม่ (Swap)</button>
+            <button id="passBtn" class="btn" style="background-color: #64748b;" onclick="passTurn()" disabled>ข้ามตา (Pass)</button>
+            <button class="btn" style="background-color: #eab308; color: #1e293b;" onclick="recallTiles()">ดึงเบี้ยกลับ</button>
+        </div>
+        <div class="card-panel">
+            <button id="drawCardBtn" class="btn" style="background-color: #ec4899;" onclick="drawCard()" disabled>🎴 สุ่มการ์ด</button>
+            <div id="cardCooldownMsg" style="font-size: 11px; color: #94a3b8;"></div>
+            <div id="cardHandEl" style="display: flex; gap: 8px;"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        // ---- persistent session identity (survives reload / reconnect) ----
+        function getSessionId() {
+            let id = localStorage.getItem('amath_session_id');
+            if (!id) {
+                id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+                localStorage.setItem('amath_session_id', id);
+            }
+            return id;
+        }
+        const sessionId = getSessionId();
+
+        let currentRoomCode = localStorage.getItem('amath_room') || null;
+        let myRole = localStorage.getItem('amath_role') || null;
+        let currentTurn = 'P1';
+        let timerInterval = null;
+        let timers = { P1: 600, P2: 600 };
+        let bagLeft = 100;
+        let gameOver = null;
+
+        const BOARD_LAYOUT = [
+            ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "3E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"],
+            ["NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL"],
+            ["NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL"],
+            ["2P", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "2P"],
+            ["NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL"],
+            ["NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL"],
+            ["NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL"],
+            ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "CENTER", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"],
+            ["NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL"],
+            ["NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL"],
+            ["NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "NORMAL"],
+            ["2P", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "2P"],
+            ["NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL", "NORMAL"],
+            ["NORMAL", "2E", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "3P", "NORMAL", "NORMAL", "NORMAL", "2E", "NORMAL"],
+            ["3E", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "NORMAL", "3E", "NORMAL", "NORMAL", "NORMAL", "2P", "NORMAL", "NORMAL", "3E"]
+        ];
+
+        let gridState = Array(15).fill(null).map(() => Array(15).fill(null));
+        let playerRack = Array(8).fill(null);
+        let placedTilesInTurn = [], selectedTileData = null;
+
+        // ---- item cards ----
+        const CARD_INFO = {
+            freeze_time:      { name: 'แช่แข็งเวลา +60วิ',        stars: 2, target: 'none' },
+            disable_specials: { name: 'ยกเลิกช่องพิเศษ (คู่แข่ง)', stars: 2, target: 'none' },
+            free_blank:       { name: 'BLANK ฟรี',                stars: 3, target: 'discard1' },
+            cell_lock:        { name: 'ล็อกช่อง',                 stars: 3, target: 'cell' },
+            tile_swap_3:      { name: 'สลับเบี้ย 3 ตัว',           stars: 4, target: 'tiles3' },
+            double_score:     { name: 'Double Score',             stars: 4, target: 'none' },
+            equal_strike:     { name: 'Equal Strike',             stars: 4, target: 'none' },
+            swap_rack:        { name: 'Swap Rack',                stars: 5, target: 'none' }
+        };
+        let myCardHand = [], myCardCooldown = 0;
+        let pendingCardAction = null; // { instanceId, cardId, target, selected: [] }
+        let myLockedCell = null;      // { row, col } — a cell an opponent's Cell Lock has closed off for my next move
+
+        function createRoom() {
+            socket.emit('create_room', { sessionId });
+        }
+        function joinRoom() {
+            const code = document.getElementById('roomCodeInput').value;
+            if (code) socket.emit('join_room', { roomCode: code, sessionId });
+        }
+
+        socket.on('connect', () => {
+            // attempt to resume an existing game after reload / reconnect
+            if (currentRoomCode) {
+                socket.emit('rejoin_room', { roomCode: currentRoomCode, sessionId });
+            }
+        });
+
+        socket.on('room_created', ({ roomCode, role }) => {
+            currentRoomCode = roomCode; myRole = role;
+            localStorage.setItem('amath_room', roomCode);
+            localStorage.setItem('amath_role', role);
+            document.getElementById('displayRoomCode').textContent = roomCode;
+            document.getElementById('displayRole').textContent = 'ผู้เล่น 1 (Host)';
+            document.getElementById('lobbyModal').style.display = 'none';
+            document.getElementById('statusMsg').textContent = 'รอผู้เล่นอีกฝ่ายเข้าร่วม...';
+        });
+
+        socket.on('room_joined', ({ roomCode, role }) => {
+            currentRoomCode = roomCode; myRole = role;
+            localStorage.setItem('amath_room', roomCode);
+            localStorage.setItem('amath_role', role);
+            document.getElementById('displayRoomCode').textContent = roomCode;
+            document.getElementById('displayRole').textContent = 'ผู้เล่น 2 (Guest)';
+            document.getElementById('lobbyModal').style.display = 'none';
+        });
+
+        socket.on('rejoin_failed', () => {
+            localStorage.removeItem('amath_room');
+            localStorage.removeItem('amath_role');
+            currentRoomCode = null; myRole = null;
+            document.getElementById('lobbyModal').style.display = 'flex';
+            document.getElementById('lobbyError').textContent = 'ไม่พบเกมเดิม กรุณาสร้างหรือเข้าร่วมห้องใหม่';
+        });
+
+        socket.on('opponent_reconnected', () => {
+            document.getElementById('statusMsg').textContent = 'คู่แข่งเชื่อมต่อกลับมาแล้ว';
+        });
+
+        // Single source of truth for board/hand/scores — sent on start and on rejoin.
+        socket.on('state_sync', ({ role, hand, gridCells, scores, currentTurn: turn, timers: t, bagLeft: bl, gameOver: go, cardHand, cardCooldown }) => {
+            myRole = role;
+            myCardHand = cardHand || [];
+            myCardCooldown = cardCooldown || 0;
+            myLockedCell = null;
+            document.getElementById('lobbyModal').style.display = 'none';
+            document.getElementById('displayRoomCode').textContent = currentRoomCode;
+            document.getElementById('displayRole').textContent = role === 'P1' ? 'ผู้เล่น 1 (Host)' : 'ผู้เล่น 2 (Guest)';
+
+            playerRack = hand;
+            gridState = Array(15).fill(null).map(() => Array(15).fill(null));
+            gridCells.forEach(c => { gridState[c.row][c.col] = { tile: c.tile }; });
+            placedTilesInTurn = [];
+
+            document.getElementById('myScore').textContent = scores[role];
+            document.getElementById('oppScore').textContent = scores[role === 'P1' ? 'P2' : 'P1'];
+
+            currentTurn = turn;
+            timers = t || timers;
+            bagLeft = bl;
+            gameOver = go;
+
+            initBoard();
+            initRack();
+            updateTurnUI();
+            renderCardPanel();
+            startTimerLoop();
+            if (gameOver) showGameOver(gameOver);
+        });
+
+        socket.on('game_ready', () => {
+            document.getElementById('statusMsg').textContent = 'เกมเริ่มแล้ว!';
+        });
+
+        socket.on('move_accepted', ({ hand, scores, currentTurn: turn, bagLeft: bl, gridUpdates, gainedScore, bonus, card }) => {
+            gridUpdates.forEach(u => { gridState[u.row][u.col] = { tile: u.tile }; });
+            playerRack = hand;
+            placedTilesInTurn = [];
+            myLockedCell = null;
+            if (card) { myCardHand = card.cardHand; myCardCooldown = card.cooldown; }
+            document.getElementById('myScore').textContent = scores[myRole];
+            document.getElementById('oppScore').textContent = scores[myRole === 'P1' ? 'P2' : 'P1'];
+            currentTurn = turn;
+            bagLeft = bl;
+            initBoard();
+            initRack();
+            updateTurnUI();
+            renderCardPanel();
+            if (bonus) {
+                const el = document.getElementById('statusMsg');
+                el.textContent = `🎉 ใช้เบี้ยหมดมือ! ได้โบนัสพิเศษ +${bonus} คะแนน (รวม +${gainedScore + bonus})`;
+            }
+        });
+
+        socket.on('move_rejected', ({ reason }) => {
+            recallTiles();
+            const el = document.getElementById('statusMsg');
+            el.textContent = '❌ ' + reason;
+            el.classList.add('error');
+            setTimeout(() => el.classList.remove('error'), 2500);
+        });
+
+        socket.on('opponent_moved', ({ gridUpdates, scores, currentTurn: nextTurn, bagLeft: bl, bonus }) => {
+            gridUpdates.forEach(u => { gridState[u.row][u.col] = { tile: u.tile }; });
+            document.getElementById('myScore').textContent = scores[myRole];
+            document.getElementById('oppScore').textContent = scores[myRole === 'P1' ? 'P2' : 'P1'];
+            currentTurn = nextTurn;
+            bagLeft = bl;
+            initBoard();
+            updateTurnUI();
+            if (bonus) {
+                document.getElementById('statusMsg').textContent = `⚡ คู่แข่งใช้เบี้ยหมดมือ ได้โบนัส +${bonus}`;
+            }
+        });
+
+        socket.on('turn_passed', ({ currentTurn: turn, card }) => {
+            currentTurn = turn;
+            placedTilesInTurn = [];
+            myLockedCell = null;
+            if (card) { myCardHand = card.cardHand; myCardCooldown = card.cooldown; }
+            updateTurnUI();
+            renderCardPanel();
+        });
+
+        socket.on('hand_swapped', ({ hand, currentTurn: nextTurn, bagLeft: bl, card }) => {
+            playerRack = hand;
+            currentTurn = nextTurn;
+            bagLeft = bl;
+            myLockedCell = null;
+            if (card) { myCardHand = card.cardHand; myCardCooldown = card.cooldown; }
+            initRack();
+            updateTurnUI();
+            renderCardPanel();
+        });
+
+        // ---- item card events ----
+        socket.on('card_drawn', ({ card, currentTurn: turn, cardHand, cooldown }) => {
+            myCardHand = cardHand;
+            myCardCooldown = cooldown;
+            currentTurn = turn;
+            const info = CARD_INFO[card.cardId] || { name: card.name };
+            document.getElementById('statusMsg').textContent = `🎴 ได้การ์ด: ${info.name}!`;
+            updateTurnUI();
+            renderCardPanel();
+        });
+
+        socket.on('opponent_drew_card', () => {
+            document.getElementById('statusMsg').textContent = '🎴 คู่แข่งสุ่มการ์ด...';
+        });
+
+        socket.on('card_used', ({ cardId, cardHand, effect, hand }) => {
+            myCardHand = cardHand;
+            if (hand) playerRack = hand;
+            if (effect?.timers) timers = effect.timers;
+            const info = CARD_INFO[cardId] || { name: cardId };
+            document.getElementById('statusMsg').textContent = `✅ ใช้การ์ด "${info.name}" สำเร็จ`;
+            renderCardPanel();
+            initRack();
+            renderTimers();
+        });
+
+        socket.on('opponent_used_card', ({ cardId, effect, hand }) => {
+            if (hand) { playerRack = hand; initRack(); }
+            if (effect?.type === 'cell_lock') { myLockedCell = { row: effect.row, col: effect.col }; initBoard(); }
+            const info = CARD_INFO[cardId] || { name: cardId };
+            document.getElementById('statusMsg').textContent = `⚡ คู่แข่งใช้การ์ด: ${info.name}`;
+        });
+
+        socket.on('opponent_left', (msg) => {
+            document.getElementById('statusMsg').textContent = '⚠️ ' + msg;
+        });
+
+        socket.on('game_over', (payload) => {
+            gameOver = payload;
+            showGameOver(payload);
+        });
+
+        socket.on('error_msg', (msg) => { document.getElementById('lobbyError').textContent = msg; });
+
+        function showGameOver(payload) {
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('swapBtn').disabled = true;
+            if (timerInterval) clearInterval(timerInterval);
+            const myFinal = payload.scores[myRole];
+            const oppFinal = payload.scores[myRole === 'P1' ? 'P2' : 'P1'];
+            let title = 'เสมอกัน!';
+            if (payload.winner) title = payload.winner === myRole ? '🎉 คุณชนะ!' : '😢 คุณแพ้';
+            document.getElementById('gameOverTitle').textContent = title;
+            document.getElementById('gameOverBody').innerHTML = `คะแนนคุณ: <b>${myFinal}</b><br>คะแนนคู่แข่ง: <b>${oppFinal}</b>`;
+            document.getElementById('gameOverModal').style.display = 'flex';
+        }
+
+        function startTimerLoop() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (gameOver) { clearInterval(timerInterval); return; }
+                if (timers[currentTurn] > 0) {
+                    timers[currentTurn]--;
+                    renderTimers();
+                    socket.emit('sync_timers', { roomCode: currentRoomCode, timers });
+                } else {
+                    document.getElementById('statusMsg').textContent = `⏰ เวลาของ ${currentTurn} หมดลงแล้ว!`;
+                    clearInterval(timerInterval);
+                }
+            }, 1000);
+        }
+
+        function renderTimers() {
+            const formatTime = (sec) => {
+                const m = Math.floor(sec / 60).toString().padStart(2, '0');
+                const s = (sec % 60).toString().padStart(2, '0');
+                return `${m}:${s}`;
+            };
+
+            const myTime = myRole === 'P1' ? timers.P1 : timers.P2;
+            const oppTime = myRole === 'P1' ? timers.P2 : timers.P1;
+
+            const myTimerEl = document.getElementById('myTimer');
+            const oppTimerEl = document.getElementById('oppTimer');
+
+            myTimerEl.textContent = formatTime(myTime);
+            oppTimerEl.textContent = formatTime(oppTime);
+
+            if (currentTurn === myRole) {
+                myTimerEl.classList.add('active');
+                oppTimerEl.classList.remove('active');
+            } else {
+                oppTimerEl.classList.add('active');
+                myTimerEl.classList.remove('active');
+            }
+        }
+
+        function updateTurnUI() {
+            const isMyTurn = myRole === currentTurn && !gameOver;
+            document.getElementById('submitBtn').disabled = !isMyTurn;
+            document.getElementById('swapBtn').disabled = !isMyTurn;
+            document.getElementById('passBtn').disabled = !isMyTurn;
+            document.getElementById('statusMsg').textContent = gameOver ? 'เกมจบแล้ว' : (isMyTurn ? '★ ตาของคุณแล้ว! วางเบี้ยได้เลย' : 'รอคู่แข่งวางสมการ...');
+            renderTimers();
+            renderCardPanel();
+        }
+
+        function renderCellLabel(cell, cellType) {
+            if (cellType === '3E') cell.innerHTML = '<span class="cell-label">3X<br>สมการ</span>';
+            else if (cellType === '2E') cell.innerHTML = '<span class="cell-label">2X<br>สมการ</span>';
+            else if (cellType === '3P') cell.innerHTML = '<span class="cell-label">3X<br>เบี้ย</span>';
+            else if (cellType === '2P') cell.innerHTML = '<span class="cell-label">2X<br>เบี้ย</span>';
+            else if (cellType === 'CENTER') {
+                cell.className += ' center-star';
+                cell.innerHTML = '★';
+            } else {
+                cell.innerHTML = '';
+            }
+        }
+
+        function initBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            for (let r = 0; r < 15; r++) {
+                for (let c = 0; c < 15; c++) {
+                    const cellType = BOARD_LAYOUT[r][c];
+                    const cell = document.createElement('div');
+                    cell.className = `cell type-${cellType}`;
+
+                    renderCellLabel(cell, cellType);
+
+                    if (gridState[r][c]) {
+                        cell.innerHTML = '';
+                        cell.appendChild(createTileEl(gridState[r][c].tile, true));
+                    } else if (pendingCardAction?.target === 'cell') {
+                        cell.className += ' targetable';
+                    }
+
+                    if (myLockedCell && myLockedCell.row === r && myLockedCell.col === c) {
+                        cell.className += ' locked-cell';
+                    }
+
+                    cell.onclick = () => onCellClick(r, c);
+                    boardEl.appendChild(cell);
+                }
+            }
+        }
+
+        function initRack() {
+            const rackEl = document.getElementById('rack');
+            rackEl.innerHTML = '';
+            playerRack.forEach(tileData => {
+                const slot = document.createElement('div');
+                slot.className = 'rack-slot';
+                if (tileData) {
+                    const tileEl = createTileEl(tileData, false);
+                    if (selectedTileData?.id === tileData.id) tileEl.classList.add('selected');
+                    slot.appendChild(tileEl);
+                }
+                rackEl.appendChild(slot);
+            });
+        }
+
+        function createTileEl(tileData, isPerm) {
+            const tile = document.createElement('div');
+            tile.className = `tile ${isPerm ? 'placed-permanently' : ''}`;
+
+            const textToShow = tileData.displaySymbol || tileData.symbol;
+            const scoreToShow = tileData.isBlank || tileData.symbol === 'BLANK' ? 0 : tileData.score;
+
+            tile.innerHTML = `${textToShow}<span class="tile-score">${scoreToShow}</span>`;
+            if (tileData.isBlank) {
+                tile.style.border = '2px dashed #0284c7';
+            }
+
+            if (pendingCardAction?.target === 'tiles3' && pendingCardAction.selected.includes(tileData.id)) {
+                tile.classList.add('selected');
+            }
+
+            if (!isPerm) {
+                tile.onclick = (e) => {
+                    e.stopPropagation();
+                    if (myRole !== currentTurn) return;
+                    if (pendingCardAction && (pendingCardAction.target === 'discard1' || pendingCardAction.target === 'tiles3')) {
+                        handleCardTileClick(tileData);
+                        return;
+                    }
+                    selectedTileData = selectedTileData?.id === tileData.id ? null : tileData;
+                    initRack();
+                };
+            }
+            return tile;
+        }
+
+        function openModalForSelection(title, optionsList, onSelect) {
+            document.getElementById('modalTitle').textContent = title;
+            const container = document.getElementById('modalContent');
+            container.innerHTML = '';
+
+            const grid = document.createElement('div');
+            grid.style.display = 'grid';
+            grid.style.gridTemplateColumns = 'repeat(4, 1fr)';
+            grid.style.gap = '8px';
+
+            optionsList.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.style.padding = '8px';
+                btn.style.fontSize = '14px';
+                btn.textContent = opt;
+                btn.onclick = () => {
+                    document.getElementById('blankModal').style.display = 'none';
+                    onSelect(opt);
+                };
+                grid.appendChild(btn);
+            });
+
+            container.appendChild(grid);
+            document.getElementById('blankModal').style.display = 'flex';
+        }
+
+        function onCellClick(r, c) {
+            if (pendingCardAction?.target === 'cell') {
+                if (myRole !== currentTurn || gameOver || gridState[r][c]) return;
+                confirmUseCard({ row: r, col: c });
+                return;
+            }
+            if (!selectedTileData || myRole !== currentTurn || gameOver) return;
+            if (gridState[r][c] || placedTilesInTurn.some(p => p.row === r && p.col === c)) return;
+
+            const sym = selectedTileData.symbol;
+
+            if (sym === 'BLANK') {
+                const allOpts = ["0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","+","-","x","÷","="];
+                openModalForSelection('เลือกสัญลักษณ์สำหรับ BLANK', allOpts, (chosenVal) => {
+                    executePlacement(r, c, chosenVal, true);
+                });
+            } else if (sym === '+/-') {
+                openModalForSelection('เลือกเครื่องหมาย', ['+', '-'], (chosenVal) => {
+                    executePlacement(r, c, chosenVal, false);
+                });
+            } else if (sym === 'x/÷') {
+                openModalForSelection('เลือกเครื่องหมาย', ['x', '÷'], (chosenVal) => {
+                    executePlacement(r, c, chosenVal, false);
+                });
+            } else {
+                executePlacement(r, c, sym, false);
+            }
+        }
+
+        function executePlacement(r, c, chosenSymbol, isBlankTile) {
+            const tileToPlace = {
+                ...selectedTileData,
+                displaySymbol: chosenSymbol,
+                isBlank: isBlankTile
+            };
+
+            const rackIdx = playerRack.findIndex(t => t?.id === selectedTileData.id);
+            if (rackIdx !== -1) playerRack[rackIdx] = null;
+
+            placedTilesInTurn.push({ tile: tileToPlace, row: r, col: c });
+            gridState[r][c] = { tile: tileToPlace };
+            selectedTileData = null;
+            initBoard();
+            initRack();
+        }
+
+        function submitMove() {
+            if (placedTilesInTurn.length === 0 || gameOver) return;
+
+            const placements = placedTilesInTurn.map(p => ({
+                tileId: p.tile.id,
+                row: p.row,
+                col: p.col,
+                displaySymbol: p.tile.displaySymbol || p.tile.symbol
+            }));
+
+            socket.emit('submit_move', { roomCode: currentRoomCode, placements });
+            // wait for move_accepted / move_rejected — server is authoritative.
+        }
+
+        function swapTiles() {
+            if (myRole !== currentTurn || gameOver) return;
+            recallTiles();
+            const tileIds = playerRack.filter(Boolean).map(t => t.id);
+            socket.emit('swap_hand', { roomCode: currentRoomCode, tileIds });
+        }
+
+        function passTurn() {
+            if (myRole !== currentTurn || gameOver) return;
+            recallTiles(); // don't lose any tiles staged on the board
+            socket.emit('pass_turn', { roomCode: currentRoomCode });
+        }
+
+        function recallTiles() {
+            placedTilesInTurn.forEach(p => {
+                gridState[p.row][p.col] = null;
+                const cleanTile = {
+                    id: p.tile.id,
+                    symbol: p.tile.symbol,
+                    score: p.tile.score,
+                    type: p.tile.type
+                };
+                const emptySlot = playerRack.findIndex(s => s === null);
+                if (emptySlot !== -1) playerRack[emptySlot] = cleanTile;
+            });
+            placedTilesInTurn = [];
+            initBoard();
+            initRack();
+        }
+
+        function drawCard() {
+            if (myRole !== currentTurn || gameOver || myCardCooldown > 0 || myCardHand.length >= 2) return;
+            socket.emit('draw_card', { roomCode: currentRoomCode });
+        }
+
+        function targetingHint(target) {
+            if (target === 'cell') return '🎯 คลิกช่องว่างบนกระดานเพื่อล็อกช่องนั้น (คู่แข่งจะวางไม่ได้ตาถัดไป)';
+            if (target === 'discard1') return '🎯 คลิกเบี้ยในมือ 1 ใบที่จะแลกทิ้ง เพื่อรับ BLANK ฟรี';
+            if (target === 'tiles3') return '🎯 คลิกเบี้ยในมือ 3 ใบที่จะส่งให้คู่แข่ง (คุณจะได้เบี้ยสุ่ม 3 ใบจากเขามาแทน)';
+            return '';
+        }
+
+        function startUseCard(c) {
+            if (pendingCardAction?.instanceId === c.instanceId) {
+                pendingCardAction = null;
+                renderCardPanel(); initBoard(); initRack();
+                updateTurnUI();
+                return;
+            }
+            const info = CARD_INFO[c.cardId];
+            if (!info || info.target === 'none') {
+                socket.emit('use_card', { roomCode: currentRoomCode, instanceId: c.instanceId, payload: {} });
+                return;
+            }
+            pendingCardAction = { instanceId: c.instanceId, cardId: c.cardId, target: info.target, selected: [] };
+            renderCardPanel(); initBoard(); initRack();
+            document.getElementById('statusMsg').textContent = targetingHint(info.target);
+        }
+
+        function handleCardTileClick(tileData) {
+            if (pendingCardAction.target === 'discard1') {
+                confirmUseCard({ discardTileId: tileData.id });
+                return;
+            }
+            if (pendingCardAction.target === 'tiles3') {
+                const idx = pendingCardAction.selected.indexOf(tileData.id);
+                if (idx !== -1) pendingCardAction.selected.splice(idx, 1);
+                else if (pendingCardAction.selected.length < 3) pendingCardAction.selected.push(tileData.id);
+                initRack();
+                if (pendingCardAction.selected.length === 3) {
+                    confirmUseCard({ tileIds: [...pendingCardAction.selected] });
+                }
+            }
+        }
+
+        function confirmUseCard(payload) {
+            socket.emit('use_card', { roomCode: currentRoomCode, instanceId: pendingCardAction.instanceId, payload });
+            pendingCardAction = null;
+            initBoard(); initRack();
+        }
+
+        function renderCardPanel() {
+            const canDraw = myRole === currentTurn && !gameOver && myCardCooldown === 0 && myCardHand.length < 2;
+            document.getElementById('drawCardBtn').disabled = !canDraw;
+            document.getElementById('cardCooldownMsg').textContent =
+                myCardCooldown > 0 ? `รออีก ${myCardCooldown} ตาถึงสุ่มการ์ดได้อีก` :
+                (myCardHand.length >= 2 ? 'มือการ์ดเต็ม (ใช้ก่อนถึงจะสุ่มใหม่ได้)' : '');
+
+            const el = document.getElementById('cardHandEl');
+            el.innerHTML = '';
+            myCardHand.forEach(c => {
+                const info = CARD_INFO[c.cardId] || { name: c.cardId, stars: 0 };
+                const div = document.createElement('div');
+                div.className = 'card-item' + (pendingCardAction?.instanceId === c.instanceId ? ' targeting' : '');
+                div.innerHTML = `<div class="card-name">${info.name}</div><div class="card-stars">${'⭐'.repeat(info.stars)}</div>`;
+                const btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.textContent = pendingCardAction?.instanceId === c.instanceId ? 'ยกเลิก' : 'ใช้';
+                btn.disabled = myRole !== currentTurn || !!gameOver;
+                btn.onclick = () => startUseCard(c);
+                div.appendChild(btn);
+                el.appendChild(div);
+            });
+        }
+
+        initBoard();
+        initRack();
+        renderCardPanel();
+    </script>
+</body>
+</html>
