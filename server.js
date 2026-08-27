@@ -567,8 +567,18 @@ io.on('connection', (socket) => {
     room.bag.push(...toSwap);
     room.bag.sort(() => Math.random() - 0.5);
 
-    const draw = room.bag.splice(0, Math.min(toSwap.length, room.bag.length));
-    room.hands[player.role] = [...keep, ...draw];
+    // try to land on a playable hand (has =, an operator, and a number), same guarantee as the initial deal
+    const drawCount = Math.min(toSwap.length, room.bag.length);
+    let newHand = keep.concat(room.bag.slice(0, drawCount));
+    let attempts = 0;
+    while (attempts < 100 && !isValidInitialHand(newHand)) {
+      room.bag.sort(() => Math.random() - 0.5);
+      newHand = keep.concat(room.bag.slice(0, drawCount));
+      attempts++;
+    }
+    room.bag.splice(0, drawCount);
+
+    room.hands[player.role] = newHand;
     room.passCount = 0;
     consumeEffectsFor(room, player.role);
     advanceTurn(room, otherRole(player.role));
