@@ -33,10 +33,12 @@
 
         .cell-label { font-size: 9px; text-align: center; line-height: 1; pointer-events: none; }
 
-        .tile { width: 90%; height: 90%; background: linear-gradient(145deg, #fef08a, #fde047); border: 1px solid #ca8a04; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: #713f12; position: relative; cursor: pointer; }
+        .tile { width: 90%; height: 90%; background: linear-gradient(145deg, #fef08a, #fde047); border: 1px solid #ca8a04; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: #713f12; position: relative; cursor: pointer; overflow: hidden; padding: 2px; }
         .tile.placed-permanently { background: #cbd5e1; border-color: #94a3b8; color: #334155; }
         .tile.selected { outline: 3px solid #38bdf8; box-shadow: 0 0 8px #38bdf8; }
         .tile .tile-score { position: absolute; bottom: 1px; right: 2px; font-size: 8px; color: #854d0e; }
+        .tile .tile-symbol { max-width: 100%; text-align: center; line-height: 1; }
+        .tile .tile-symbol.small-text { font-size: 9px; }
 
         .rack { display: flex; gap: 6px; background-color: #334155; padding: 8px; border-radius: 10px; min-height: 50px; }
         .rack-slot { width: 38px; height: 42px; background-color: #1e293b; border-radius: 4px; border: 1px dashed #64748b; display: flex; align-items: center; justify-content: center; cursor: pointer; }
@@ -494,11 +496,13 @@
             const tile = document.createElement('div');
             tile.className = `tile ${isPerm ? 'placed-permanently' : ''}`;
 
-            const textToShow = tileData.displaySymbol || tileData.symbol;
+            // an unresolved BLANK tile (still in hand, symbol picked yet) shows a star instead of the long word "BLANK"
+            const rawText = tileData.displaySymbol || (tileData.symbol === 'BLANK' ? '★' : tileData.symbol);
             const scoreToShow = tileData.isBlank || tileData.symbol === 'BLANK' ? 0 : tileData.score;
+            const textClass = String(rawText).length > 2 ? 'tile-symbol small-text' : 'tile-symbol';
 
-            tile.innerHTML = `${textToShow}<span class="tile-score">${scoreToShow}</span>`;
-            if (tileData.isBlank) {
+            tile.innerHTML = `<span class="${textClass}">${rawText}</span><span class="tile-score">${scoreToShow}</span>`;
+            if (tileData.isBlank || tileData.symbol === 'BLANK') {
                 tile.style.border = '2px dashed #0284c7';
             }
 
