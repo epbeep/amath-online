@@ -244,6 +244,43 @@ function cardSnapshot(room, role) {
   return { cardHand: room.cardHands[role], cooldown: room.cardCooldown[role] };
 }
 
+// ---------------------------------------------------------------------------
+// Server-authoritative turn timer — the server ticks every room's clock itself
+// and broadcasts the result, so both clients always see the exact same time
+// and a timeout is enforced even if a client's tab is backgrounded/throttled.
+// ---------------------------------------------------------------------------
+function stopRoomTimer(room) {
+  if (room._timerHandle) {
+    clearInterval(room._timerHandle);
+    room._timerHandle = null;
+  }
+}
+
+function endGame(room, roomCode, payload) {
+  room.gameOver = payload;
+  stopRoomTimer(room);
+  io.to(roomCode).emit('game_over', payload);
+}
+
+function startRoomTimer(roomCode) {
+  const room = rooms[roomCode];
+  if (!room || room._timerHandle || room.gameOver) return;
+
+  room._timerHandle = setInterval(() => {
+    const r = rooms[roomCode];
+    if (!r || r.gameOver) { stopRoomTimer(r || room); return; }
+
+    const active = r.currentTurn;
+    if (r.timers[active] > 0) {
+      r.timers[active]--;
+      io.to(roomCode).emit('timer_update', { timers: r.timers });
+      if (r.timers[active] <= 0) {
+        endGame(r, roomCode, { winner: otherRole(active), scores: r.scores, reason: 'timeout' });
+      }
+    }
+  }, 1000);
+}
+
 function findPlayer(room, socketId) {
   return room.players.find(p => p.socketId === socketId);
 }
@@ -453,6 +490,7 @@ io.on('connection', (socket) => {
     sendState(p1.socketId, room, 'P1');
     sendState(socket.id, room, 'P2');
     io.to(code).emit('game_ready');
+    startRoomTimer(code);
   });
 
   socket.on('rejoin_room', ({ roomCode, sessionId } = {}) => {
@@ -467,6 +505,7 @@ io.on('connection', (socket) => {
     socket.join(code);
     sendState(socket.id, room, player.role);
     socket.to(code).emit('opponent_reconnected');
+    startRoomTimer(code); // no-op if already running; safety net e.g. after a server restart
   });
 
   socket.on('submit_move', ({ roomCode, placements }) => {
@@ -549,12 +588,11 @@ io.on('connection', (socket) => {
 
     // if both players pass back-to-back, the game is stuck — end it with current scores
     if (room.passCount >= 2) {
-      room.gameOver = {
+      endGame(room, roomCode, {
         winner: room.scores.P1 === room.scores.P2 ? null : (room.scores.P1 > room.scores.P2 ? 'P1' : 'P2'),
         scores: room.scores,
         reason: 'both_passed'
-      };
-      io.to(roomCode).emit('game_over', room.gameOver);
+      });
     }
   });
 
@@ -667,26 +705,11 @@ io.on('connection', (socket) => {
     const player = findPlayer(room, socket.id);
     if (!player) return;
 
-    room.gameOver = {
+    endGame(room, roomCode, {
       winner: otherRole(player.role),
       scores: room.scores,
       reason: 'resign'
-    };
-    io.to(roomCode).emit('game_over', room.gameOver);
-  });
-
-  socket.on('sync_timers', ({ roomCode, timers }) => {
-    const room = rooms[roomCode];
-    if (!room || !timers || room.gameOver) return;
-    room.timers = timers;
-
-    // server-authoritative timeout enforcement: whoever's turn it is loses if their clock hits 0
-    const activeRole = room.currentTurn;
-    if (room.timers[activeRole] !== undefined && room.timers[activeRole] <= 0) {
-      const winner = otherRole(activeRole);
-      room.gameOver = { winner, scores: room.scores, reason: 'timeout' };
-      io.to(roomCode).emit('game_over', room.gameOver);
-    }
+    });
   });
 
   socket.on('disconnect', () => {
@@ -781,11 +804,10 @@ function checkGameOver(room, roomCode, moverRole) {
     const otherHandValue = room.hands[other].reduce((s, t) => s + t.score, 0);
     room.scores[moverRole] += otherHandValue;
     room.scores[other] -= otherHandValue;
-    room.gameOver = {
+    endGame(room, roomCode, {
       winner: room.scores.P1 === room.scores.P2 ? null : (room.scores.P1 > room.scores.P2 ? 'P1' : 'P2'),
       scores: room.scores
-    };
-    io.to(roomCode).emit('game_over', room.gameOver);
+    });
   }
 }
 
