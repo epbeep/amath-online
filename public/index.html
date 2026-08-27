@@ -109,7 +109,7 @@
         <div class="lobby-card">
             <h2 id="gameOverTitle" style="color: #facc15;">จบเกม!</h2>
             <div id="gameOverBody" style="font-size: 15px;"></div>
-            <button class="btn" onclick="location.reload()">เล่นใหม่</button>
+            <button class="btn" onclick="playAgain()">เล่นใหม่</button>
         </div>
     </div>
 
@@ -445,6 +445,8 @@
             if (payload.winner) title = payload.winner === myRole ? '🎉 คุณชนะ!' : '😢 คุณแพ้';
             if (payload.reason === 'resign') {
                 title = payload.winner === myRole ? '🏳️ คู่แข่งยอมแพ้ คุณชนะ!' : '🏳️ คุณยอมแพ้';
+            } else if (payload.reason === 'timeout') {
+                title = payload.winner === myRole ? '⏰ คู่แข่งหมดเวลา คุณชนะ!' : '⏰ เวลาคุณหมด คุณแพ้';
             }
             document.getElementById('gameOverTitle').textContent = title;
             document.getElementById('gameOverBody').innerHTML = `คะแนนคุณ: <b>${myFinal}</b><br>คะแนนคู่แข่ง: <b>${oppFinal}</b>`;
@@ -457,6 +459,13 @@
             socket.emit('resign', { roomCode: currentRoomCode });
         }
 
+        function playAgain() {
+            // clear the finished room from storage first, or reload would auto-rejoin the same finished game
+            localStorage.removeItem('amath_room');
+            localStorage.removeItem('amath_role');
+            location.reload();
+        }
+
         function startTimerLoop() {
             if (timerInterval) clearInterval(timerInterval);
             timerInterval = setInterval(() => {
@@ -466,7 +475,7 @@
                     renderTimers();
                     socket.emit('sync_timers', { roomCode: currentRoomCode, timers });
                 } else {
-                    document.getElementById('statusMsg').textContent = `⏰ เวลาของ ${currentTurn} หมดลงแล้ว!`;
+                    document.getElementById('statusMsg').textContent = `⏰ เวลาของ ${currentTurn} หมดลงแล้ว! กำลังจบเกม...`;
                     clearInterval(timerInterval);
                 }
             }, 1000);
