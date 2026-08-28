@@ -183,7 +183,6 @@ function evalSide(tokens) {
 }
 
 // tokens: array of display symbols for a full line/sequence of cells.
-// tokens: array of display symbols for a full line/sequence of cells.
 // Supports chained equalities (A=B=C=...) — every segment split by '=' must evaluate to the same value.
 function validateEquation(tokens) {
   if (tokens.length < 3) return false;
@@ -661,8 +660,12 @@ io.on('connection', (socket) => {
     room.cardHands[player.role].push(instance);
     room.cardCooldown[player.role] = CARD_DRAW_COOLDOWN_TURNS;
 
-    // drawing a card uses up the whole turn, like a pass
+    // drawing a card uses up the whole turn, like a pass — also consume any one-shot
+    // effect targeting this player's turn, same as submit_move/pass_turn/swap_hand do,
+    // so a restriction (or a self-buff like double_score) can't be preserved indefinitely
+    // by choosing to draw instead of actually taking a turn.
     room.passCount = 0;
+    consumeEffectsFor(room, player.role);
     advanceTurn(room, otherRole(player.role));
 
     socket.emit('card_drawn', {
@@ -749,6 +752,10 @@ function applyCardEffect(room, role, opp, cardId, payload) {
         return { ok: false, reason: 'ตำแหน่งช่องไม่ถูกต้อง' };
       }
       if (room.grid[row][col]) return { ok: false, reason: 'ช่องนี้มีเบี้ยอยู่แล้ว เลือกช่องว่างเท่านั้น' };
+      const boardEmpty = room.grid.every(r => r.every(cell => !cell));
+      if (boardEmpty && row === CENTER_ROW && col === CENTER_COL) {
+        return { ok: false, reason: 'ล็อกช่องกลางตอนกระดานยังว่างเปล่าไม่ได้ (คู่แข่งจะไม่มีทางวางตาแรกได้เลย)' };
+      }
       room.effects.cellLocked = { row, col, forRole: opp };
       return { ok: true, publicInfo: { type: 'cell_lock', row, col }, opponentInfo: { type: 'cell_lock', row, col } };
     }
