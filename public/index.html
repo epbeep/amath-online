@@ -140,6 +140,7 @@
                     <div id="oppTimer" class="timer-box">10:00</div>
                 </div>
             </div>
+            <div style="font-size: 12px; color: #94a3b8; text-align: center; margin-top: -6px;">🎒 เบี้ยเหลือในถุง: <span id="bagLeftDisplay" style="color: #e2e8f0; font-weight: bold;">100</span> ใบ</div>
 
             <div class="game-container">
                 <div style="display: flex; justify-content: flex-end; width: 100%;">
@@ -320,6 +321,7 @@
             currentTurn = turn;
             timers = t || timers;
             bagLeft = bl;
+            renderBagLeft();
             gameOver = go;
 
             initBoard();
@@ -344,6 +346,7 @@
             document.getElementById('oppScore').textContent = scores[myRole === 'P1' ? 'P2' : 'P1'];
             currentTurn = turn;
             bagLeft = bl;
+            renderBagLeft();
             initBoard();
             initRack();
             updateTurnUI();
@@ -368,6 +371,7 @@
             document.getElementById('oppScore').textContent = scores[myRole === 'P1' ? 'P2' : 'P1'];
             currentTurn = nextTurn;
             bagLeft = bl;
+            renderBagLeft();
             initBoard();
             updateTurnUI();
             if (bonus) {
@@ -388,6 +392,7 @@
             playerRack = hand;
             currentTurn = nextTurn;
             bagLeft = bl;
+            renderBagLeft();
             myLockedCell = null;
             if (card) { myCardHand = card.cardHand; myCardCooldown = card.cooldown; }
             initRack();
@@ -442,7 +447,9 @@
         function showGameOver(payload) {
             document.getElementById('submitBtn').disabled = true;
             document.getElementById('swapBtn').disabled = true;
+            document.getElementById('passBtn').disabled = true;
             document.getElementById('resignBtn').disabled = true;
+            document.getElementById('drawCardBtn').disabled = true;
             if (timerInterval) clearInterval(timerInterval);
             const myFinal = payload.scores[myRole];
             const oppFinal = payload.scores[myRole === 'P1' ? 'P2' : 'P1'];
@@ -456,6 +463,7 @@
             document.getElementById('gameOverTitle').textContent = title;
             document.getElementById('gameOverBody').innerHTML = `คะแนนคุณ: <b>${myFinal}</b><br>คะแนนคู่แข่ง: <b>${oppFinal}</b>`;
             document.getElementById('gameOverModal').style.display = 'flex';
+            renderCardPanel(); // also disables each individual card's "ใช้" button now that gameOver is set
         }
 
         function resignGame() {
@@ -523,6 +531,11 @@
             void boardCol.offsetWidth; // force reflow so the class re-triggers
             boardCol.classList.add('turn-siren');
             setTimeout(() => boardCol.classList.remove('turn-siren'), 3000);
+        }
+
+        function renderBagLeft() {
+            const el = document.getElementById('bagLeftDisplay');
+            if (el) el.textContent = bagLeft;
         }
 
         function renderCellLabel(cell, cellType) {
